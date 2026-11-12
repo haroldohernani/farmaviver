@@ -1,0 +1,23 @@
+{
+  "name": "FarmaViva — Gestão de Escala 5x2",
+  "short_name": "FarmaViva",
+  "description": "Sistema de Gestão de Escala 5x2 para Drogarias — Mobile First",
+  "start_url": "/home",
+  "display": "standalone",
+  "background_color": "#f1f3f5",
+  "theme_color": "#e9ecef",
+  "icons": [
+    {
+      "src": "/img/logofarmaviver.svg",
+      "sizes": "any",
+      "type": "image/svg+xml",
+      "purpose": "any maskable"
+    },
+    {
+      "src": "/img/logofarmaviver.png",
+      "sizes": "192x192 512x512",
+      "type": "image/png"
+    }
+  ]
+}
+

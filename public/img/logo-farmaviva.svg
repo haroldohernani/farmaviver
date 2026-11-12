@@ -1,0 +1,24 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 320 80" width="320" height="80" role="img" aria-label="Logo FarmaViva">
+  <defs>
+    <linearGradient id="bgGrad" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#495057" />
+      <stop offset="100%" stop-color="#343a40" />
+    </linearGradient>
+    <linearGradient id="crossGrad" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#f8f9fa" />
+      <stop offset="100%" stop-color="#dee2e6" />
+    </linearGradient>
+  </defs>
+  <!-- Ícone Cruz Farmacêutica Estilizada -->
+  <rect x="8" y="10" width="60" height="60" rx="16" fill="url(#bgGrad)" stroke="#adb5bd" stroke-width="2"/>
+  <path d="M33 22 H43 V35 H56 V45 H43 V58 H33 V45 H20 V35 H33 Z" fill="url(#crossGrad)"/>
+  <circle cx="53" cy="25" r="4" fill="#adb5bd"/>
+  <!-- Tipografia FarmaViva -->
+  <text x="82" y="44" font-family="'Segoe UI', Roboto, Helvetica, Arial, sans-serif" font-size="30" font-weight="800" fill="#343a40" letter-spacing="-0.5">
+    Farma<tspan fill="#6c757d" font-weight="600">Viva</tspan>
+  </text>
+  <text x="84" y="63" font-family="'Segoe UI', Roboto, Helvetica, Arial, sans-serif" font-size="11.5" font-weight="600" fill="#6c757d" letter-spacing="1.8">
+    GESTÃO DE ESCALAS 5X2
+  </text>
+</svg>
+

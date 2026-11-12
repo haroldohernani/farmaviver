@@ -1,0 +1,430 @@
+/* ==========================================================================
+   FarmaViva (FarmaViver) - Tema Mobile First em Tons de Cinza Claro
+   Tipografia Compacta de WebApp (Atualização 02/11/2026)
+   ========================================================================== */
+
+:root {
+    --fv-gray-50: #f8f9fa;
+    --fv-gray-100: #f1f3f5;
+    --fv-gray-200: #e9ecef;
+    --fv-gray-300: #dee2e6;
+    --fv-gray-400: #ced4da;
+    --fv-gray-500: #adb5bd;
+    --fv-gray-600: #6c757d;
+    --fv-gray-700: #495057;
+    --fv-gray-800: #343a40;
+    --fv-gray-900: #212529;
+    --fv-radius: 0.65rem;
+    --fv-shadow-sm: 0 1px 5px rgba(33, 37, 41, 0.06);
+    --fv-shadow-md: 0 4px 14px rgba(33, 37, 41, 0.09);
+}
+
+html, body {
+    height: 100%;
+    background-color: var(--fv-gray-100);
+    color: var(--fv-gray-800);
+    font-family: 'Inter', 'Segoe UI', Roboto, Helvetica, Arial, sans-serif;
+    font-size: 0.8125rem; /* 13px - Padrão compacto WebApp */
+    line-height: 1.38;
+    -webkit-font-smoothing: antialiased;
+}
+
+h1, .h1, h2, .h2, h3, .h3, h4, .h4, h5, .h5, h6, .h6 {
+    line-height: 1.25;
+}
+
+.fv-banner-title {
+    font-size: 0.9rem;
+}
+
+.fv-section-title {
+    font-size: 0.84rem;
+}
+
+.small, small {
+    font-size: 0.74rem !important;
+}
+
+.badge {
+    font-size: 0.68rem;
+    font-weight: 600;
+    padding: 0.25em 0.55em;
+}
+
+code {
+    font-size: 0.73rem;
+}
+
+/* Logo na Tela de Login (acima de "Acesso ao Sistema") */
+.fv-login-logo {
+    max-width: 175px;
+    max-height: 64px;
+    width: auto;
+    height: auto;
+    object-fit: contain;
+}
+
+/* Card de Login Mobile First */
+.fv-login-wrapper {
+    min-height: calc(100vh - 46px);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    padding: 1rem 0.75rem;
+}
+
+.fv-login-card {
+    width: 100%;
+    max-width: 380px;
+    background-color: #ffffff;
+    border: 1px solid var(--fv-gray-300);
+    border-radius: var(--fv-radius);
+    box-shadow: var(--fv-shadow-md);
+    overflow: hidden;
+}
+
+.fv-login-card-header {
+    background-color: var(--fv-gray-200);
+    border-bottom: 1px solid var(--fv-gray-300);
+    padding: 0.8rem 1rem;
+}
+
+.fv-login-card-body {
+    padding: 1.15rem 1rem;
+}
+
+.fv-login-label {
+    font-size: 0.92rem !important;
+    font-weight: 700 !important;
+    color: var(--fv-gray-900) !important;
+    letter-spacing: 0.015em;
+}
+
+/* Inputs Mobile First Compactos */
+.fv-form-control {
+    background-color: var(--fv-gray-50);
+    border: 1px solid var(--fv-gray-300);
+    border-radius: 0.45rem;
+    color: var(--fv-gray-900);
+    font-size: 0.8rem;
+    padding: 0.42rem 0.68rem;
+    transition: border-color 0.15s ease, box-shadow 0.15s ease, background-color 0.15s ease;
+}
+
+.fv-form-control:focus {
+    background-color: #ffffff;
+    border-color: var(--fv-gray-700);
+    box-shadow: 0 0 0 0.18rem rgba(73, 80, 87, 0.16);
+}
+
+.fv-form-control.is-invalid:focus {
+    box-shadow: 0 0 0 0.18rem rgba(220, 53, 69, 0.2);
+}
+
+/* Botões em Tons de Cinza Escuro / Grafite */
+.btn {
+    font-size: 0.78rem;
+}
+
+.btn-sm {
+    font-size: 0.74rem;
+    padding: 0.28rem 0.6rem;
+}
+
+.fv-btn-xs {
+    font-size: 0.69rem !important;
+    padding: 0.18rem 0.45rem !important;
+}
+
+.btn-fv-primary {
+    background-color: var(--fv-gray-800);
+    border-color: var(--fv-gray-800);
+    color: #ffffff;
+    font-weight: 600;
+    padding: 0.42rem 0.85rem;
+    border-radius: 0.45rem;
+    transition: all 0.18s ease;
+}
+
+.btn-fv-primary:hover, .btn-fv-primary:focus {
+    background-color: var(--fv-gray-700);
+    border-color: var(--fv-gray-700);
+    color: #ffffff;
+}
+
+.btn-fv-outline {
+    background-color: var(--fv-gray-50);
+    border: 1px solid var(--fv-gray-400);
+    color: var(--fv-gray-800);
+    font-weight: 600;
+    border-radius: 0.45rem;
+    transition: all 0.15s ease;
+}
+
+.btn-fv-outline:hover {
+    background-color: var(--fv-gray-200);
+    color: var(--fv-gray-900);
+    border-color: var(--fv-gray-600);
+}
+
+/* Header da Home (Logo à esquerda, Usuário + Tempo Logado em tempo real, Botão Sair à direita) */
+.fv-home-navbar {
+    background: linear-gradient(180deg, #ffffff 0%, var(--fv-gray-200) 100%);
+    border-bottom: 1px solid var(--fv-gray-300);
+    box-shadow: var(--fv-shadow-sm);
+    padding: 0.42rem 0.75rem;
+    z-index: 1030;
+}
+
+.fv-home-logo {
+    height: 34px;
+    width: auto;
+    object-fit: contain;
+}
+
+.fv-user-badge {
+    background-color: var(--fv-gray-100);
+    border: 1px solid var(--fv-gray-300);
+    border-radius: 0.45rem;
+    padding: 0.22rem 0.55rem;
+    font-size: 0.76rem;
+    color: var(--fv-gray-800);
+}
+
+.fv-clock-badge {
+    background-color: var(--fv-gray-800);
+    color: var(--fv-gray-50);
+    border-radius: 0.38rem;
+    padding: 0.18rem 0.5rem;
+    font-family: 'Consolas', 'Courier New', monospace;
+    font-size: 0.74rem;
+    font-weight: 600;
+    letter-spacing: 0.3px;
+}
+
+/* Cards de Módulos e CRUDs na Home */
+.fv-module-card {
+    background-color: #ffffff;
+    border: 1px solid var(--fv-gray-300);
+    border-radius: var(--fv-radius);
+    box-shadow: var(--fv-shadow-sm);
+    transition: transform 0.15s ease, box-shadow 0.15s ease, border-color 0.15s ease;
+    height: 100%;
+    display: flex;
+    flex-direction: column;
+}
+
+.fv-module-card:hover {
+    transform: translateY(-1px);
+    box-shadow: var(--fv-shadow-md);
+    border-color: var(--fv-gray-500);
+}
+
+.fv-module-card-header {
+    background-color: var(--fv-gray-200);
+    border-bottom: 1px solid var(--fv-gray-300);
+    padding: 0.52rem 0.75rem;
+    font-size: 0.8rem;
+    border-top-left-radius: calc(var(--fv-radius) - 1px);
+    border-top-right-radius: calc(var(--fv-radius) - 1px);
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+}
+
+.fv-icon-box {
+    width: 28px;
+    height: 28px;
+    border-radius: 0.42rem;
+    background-color: var(--fv-gray-700);
+    color: #ffffff;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 0.88rem;
+    flex-shrink: 0;
+}
+
+/* Navegação de Abas Operacionais */
+.fv-nav-pills .nav-link {
+    color: var(--fv-gray-700);
+    background-color: var(--fv-gray-200);
+    border: 1px solid var(--fv-gray-300);
+    border-radius: 0.45rem;
+    font-weight: 600;
+    font-size: 0.76rem;
+    padding: 0.36rem 0.68rem;
+    margin-right: 0.25rem;
+    margin-bottom: 0.25rem;
+    transition: all 0.15s ease;
+}
+
+.fv-nav-pills .nav-link:hover {
+    background-color: var(--fv-gray-300);
+    color: var(--fv-gray-900);
+}
+
+.fv-nav-pills .nav-link.active {
+    background-color: var(--fv-gray-800);
+    border-color: var(--fv-gray-800);
+    color: #ffffff;
+}
+
+/* Abas Principais da Home Empilhadas Verticalmente (Item 1 - 07/11/2026) */
+#fv-main-tabs {
+    display: flex;
+    flex-direction: column;
+    gap: 0.3rem;
+    min-width: 265px;
+}
+
+#fv-main-tabs .nav-item {
+    width: 100%;
+}
+
+#fv-main-tabs .nav-link {
+    width: 100%;
+    text-align: left;
+    margin-right: 0;
+    margin-bottom: 0;
+    display: flex;
+    align-items: center;
+}
+
+/* Cabeçalhos de Tabelas com Quebra de Linha Coerente (Item 5 - 07/11/2026) */
+.table thead th {
+    vertical-align: middle;
+    line-height: 1.18;
+}
+
+/* Tabelas Compactas (Itens 8 e 9: Dashboard do Dia e Visualizador Semanal / Edição) */
+.fv-table-compact {
+    font-size: 0.72rem !important;
+    line-height: 1.22;
+}
+
+.fv-table-compact th {
+    font-size: 0.71rem;
+    font-weight: 700;
+    text-transform: uppercase;
+    letter-spacing: 0.2px;
+    color: var(--fv-gray-700);
+    padding: 0.34rem 0.48rem !important;
+    white-space: nowrap;
+    vertical-align: middle;
+    line-height: 1.16;
+}
+
+.fv-table-compact td {
+    font-size: 0.72rem;
+    padding: 0.28rem 0.48rem !important;
+    vertical-align: middle;
+}
+
+.fv-table-compact code {
+    font-size: 0.69rem;
+}
+
+.fv-table-compact .badge {
+    font-size: 0.63rem;
+    padding: 0.2em 0.48em;
+}
+
+/* Matriz de Escala Mensal (Pivot sp_relatorio_escala_matriz) */
+.fv-matrix-table {
+    font-size: 0.7rem;
+    border-collapse: separate;
+    border-spacing: 0;
+}
+
+.fv-matrix-table th,
+.fv-matrix-table td {
+    vertical-align: middle;
+    white-space: nowrap;
+    padding: 0.28rem 0.36rem;
+    border-bottom: 1px solid var(--fv-gray-300);
+    border-right: 1px solid var(--fv-gray-200);
+}
+
+.fv-matrix-table thead th {
+    background-color: var(--fv-gray-200);
+    color: var(--fv-gray-800);
+    font-weight: 700;
+    position: sticky;
+    top: 0;
+    z-index: 2;
+}
+
+.fv-matrix-sticky-col {
+    position: sticky;
+    left: 0;
+    background-color: #ffffff;
+    z-index: 1;
+    border-right: 2px solid var(--fv-gray-400) !important;
+}
+
+.fv-cell-folga {
+    background-color: var(--fv-gray-200) !important;
+    color: var(--fv-gray-700);
+    font-weight: 700;
+}
+
+.fv-cell-feriado {
+    background-color: #d3d9df !important;
+    color: var(--fv-gray-900);
+    font-weight: 700;
+}
+
+.fv-cell-trabalho {
+    background-color: #ffffff;
+    color: var(--fv-gray-800);
+}
+
+/* KPI Mini Cards no Dashboard do Dia */
+.fv-kpi-box {
+    background-color: var(--fv-gray-50);
+    border: 1px solid var(--fv-gray-300);
+    border-radius: 0.5rem;
+    padding: 0.55rem 0.75rem;
+}
+
+/* Footer */
+.fv-footer {
+    font-size: 0.73rem;
+}
+
+/* Modais em Tons de Cinza Claro */
+.modal-content {
+    border: 1px solid var(--fv-gray-400);
+    border-radius: var(--fv-radius);
+    box-shadow: var(--fv-shadow-md);
+    font-size: 0.79rem;
+}
+
+.modal-header {
+    background-color: var(--fv-gray-200);
+    border-bottom: 1px solid var(--fv-gray-300);
+    padding: 0.65rem 1rem;
+}
+
+.modal-title {
+    font-size: 0.88rem;
+}
+
+.modal-footer {
+    background-color: var(--fv-gray-100);
+    border-top: 1px solid var(--fv-gray-300);
+    padding: 0.55rem 1rem;
+}
+
+@media (min-width: 768px) {
+    .fv-login-logo {
+        max-width: 210px;
+    }
+    .fv-login-card-body {
+        padding: 1.35rem 1.25rem;
+    }
+    .fv-home-logo {
+        height: 38px;
+    }
+}
