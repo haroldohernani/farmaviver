@@ -390,14 +390,16 @@ class FarmaVivaApp {
 
         tbody.innerHTML = html;
 
+        // Sugestão B (13/11/2026): Atualiza select de cargos ativos no formulário de Funcionários e contador na Home
+        const listaAtivos = lista.filter((c) => Boolean(c.car_ativo));
         const selCargoFun = document.getElementById('crud_fun_car_id') as HTMLSelectElement | null;
         if (selCargoFun) {
             const currentVal = selCargoFun.value;
-            selCargoFun.innerHTML = lista.map((c) => `<option value="${c.car_id}">${this.escapeHtml(c.car_nome)}</option>`).join('');
+            selCargoFun.innerHTML = listaAtivos.map((c) => `<option value="${c.car_id}">${this.escapeHtml(c.car_nome)}</option>`).join('');
             if (currentVal) selCargoFun.value = currentVal;
         }
 
-        const cargosAtivos = lista.filter((c) => Boolean(c.car_ativo)).length;
+        const cargosAtivos = listaAtivos.length;
         const badgeCar = document.getElementById('badge-home-car-ativos');
         if (badgeCar) badgeCar.textContent = `${cargosAtivos} cargos ativos`;
     }

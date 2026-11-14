@@ -123,6 +123,9 @@ class HomeController extends Controller
             'data_fim' => $semanaFim,
         ]);
 
+        // Itens 2 e 3 + Sugestão A (13/11/2026): Garante que todos os cargos cadastrados estejam sincronizados entre todas as empresas
+        Cargo::sincronizarEntreEmpresas();
+
         $cargos = Cargo::where('emp_id', $empId)->withCount('funcionarios')->orderBy('car_nome')->get();
         $turnos = TurnoHorario::where('emp_id', $empId)->withCount('funcionariosPadrao')->orderBy('tur_entrada')->get();
         $funcionarios = Funcionario::with(['cargo', 'turnoPadrao', 'perfis'])

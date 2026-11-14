@@ -280,6 +280,9 @@ class CrudApiController extends Controller
                 ]));
             }
         }
+
+        // Itens 2 e 3 + Sugestão A (13/11/2026): Sincroniza todos os cargos cadastrados para a empresa
+        Cargo::sincronizarEntreEmpresas();
     }
 
     // =========================================================================
@@ -288,6 +291,10 @@ class CrudApiController extends Controller
     public function listarCargos(Request $request): JsonResponse
     {
         $empId = $this->empId($request);
+
+        // Garante que todos os cargos cadastrados em qualquer empresa estejam sincronizados
+        Cargo::sincronizarEntreEmpresas();
+
         $cargos = Cargo::where('emp_id', $empId)
             ->withCount('funcionarios')
             ->orderBy('car_nome')
@@ -310,15 +317,58 @@ class CrudApiController extends Controller
             'car_ativo' => ['required', 'boolean'],
         ]);
 
+        $validated['car_nome'] = trim($validated['car_nome']);
         $validated['emp_id'] = $empId;
+        $chaveNovoNome = mb_strtolower($validated['car_nome']);
 
         if ($id) {
             $cargo = Cargo::findOrFail($id);
+            $chaveNomeAntigo = mb_strtolower(trim((string) $cargo->car_nome));
             $cargo->update($validated);
-            $msg = 'Cargo atualizado com sucesso!';
+
+            // Item 2 + Sugestões A e C (13/11/2026): Propaga a atualização do cargo para todas as outras empresas
+            $todasEmpresas = Empresa::orderBy('emp_id')->pluck('emp_id')->all();
+            foreach ($todasEmpresas as $outroEmpId) {
+                if ((int) $outroEmpId === $empId) {
+                    continue;
+                }
+                $cargoOutraEmpresa = Cargo::where('emp_id', $outroEmpId)
+                    ->whereRaw('LOWER(TRIM(car_nome)) IN (?, ?)', [$chaveNomeAntigo, $chaveNovoNome])
+                    ->first();
+
+                $dadosReplica = [
+                    'emp_id' => (int) $outroEmpId,
+                    'car_nome' => $validated['car_nome'],
+                    'car_descricao' => $validated['car_descricao'] ?? null,
+                    'car_cbo' => $validated['car_cbo'] ?? null,
+                    'car_ativo' => $validated['car_ativo'],
+                ];
+
+                if ($cargoOutraEmpresa) {
+                    $cargoOutraEmpresa->update($dadosReplica);
+                } else {
+                    Cargo::create($dadosReplica);
+                }
+            }
+
+            $msg = 'Cargo atualizado e sincronizado em todas as empresas com sucesso!';
         } else {
-            $cargo = Cargo::create($validated);
-            $msg = 'Novo cargo cadastrado com sucesso!';
+            // Sugestão C (13/11/2026): Previne duplicidade de nome de cargo na mesma empresa
+            $cargoExistente = Cargo::where('emp_id', $empId)
+                ->whereRaw('LOWER(TRIM(car_nome)) = ?', [$chaveNovoNome])
+                ->first();
+
+            if ($cargoExistente) {
+                $cargoExistente->update($validated);
+                $cargo = $cargoExistente;
+            } else {
+                $cargo = Cargo::create($validated);
+            }
+
+            // Item 2 + Sugestão A (13/11/2026): Disponibiliza o cargo recém-cadastrado para todas as demais empresas
+            Cargo::sincronizarEntreEmpresas();
+
+            $msg = 'Novo cargo cadastrado e disponibilizado para todas as empresas com sucesso!';
         }
 
         return response()->json([

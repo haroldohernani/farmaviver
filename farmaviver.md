@@ -490,12 +490,14 @@ que aos sábados todas as Empresas cadastradas tem expediente da 08 as 20hs e ao
 1. A geração de escala 5x2 não está funcionando corretamente, por exemplo: 
 1.1 dia 13/11/2026 existe 3 funcionários do turno da manhã e somente 1 no turno da noite, outro exemplo dia 12/11/2026 3 funcionários pela manhã e nenhum no período da tarde para fechamento escala totalmente mal distribuída. Corrigir urgente;
 
-2. 
+2. Quero que ao cadastrar cargos, estes registros sejam acessados por outras empresas;
+
+3. Como já existe uma empresa com emp_id = 2, está faltando a inserção desta empresa x cargo
 << 13/11/2026 - fim observação >>
 
 << 13/11/2026 - atualização realizada >>
 
-### Registro Técnico das Alterações Realizadas em 13/11/2026 (Item 1 / 1.1 + Sugestões A, B e C)
+### Registro Técnico das Alterações Realizadas em 13/11/2026 (Itens 1 / 1.1, 2 e 3 + Sugestões A, B e C)
 
 1. **Item 1 / 1.1 — Correção da Distribuição de Turnos (Manhã x Fechamento) e Eliminação de Sobreposição de Folgas (`app/Http/Controllers/Api/EscalaApiController.php`, `app/Http/Controllers/Api/CrudApiController.php` e `sp_gerar_escala_5x2_funcionario`):**
    * **Causa Raiz Corrigida:**
@@ -516,5 +518,13 @@ que aos sábados todas as Empresas cadastradas tem expediente da 08 as 20hs e ao
        * **Todos os demais dias úteis do mês:** Cobertura equilibrada com **2 a 3 colaboradores na Manhã** e **2 a 3 colaboradores no Fechamento**, além de **Sábados (`08h–20h`)** e **Domingos/Feriados (`08h–13h`)** 100% cobertos e **Art. 386 da CLT** `CONFORME`.
    * **Sugestão C — Indicador de Cobertura por Turno (`Manhã | Fechamento | Plantão`) no Dashboard / Visão do Dia (`EscalaApiController::dashboardDia` e `resources/views/home/index.blade.php`):**
      * Inclusão do resumo `(Manhã: X | Fechamento: Y)` (ou `(Plantão: Z)` aos sábados, domingos e feriados) diretamente no card KPI **"Em Trabalho Hoje"** na Visão Operacional do Dia.
+
+3. **Itens 2 e 3 — Compartilhamento Automático de Cargos entre Empresas e Inserção `Empresa x Cargo` para `emp_id = 2` (`app/Models/Cargo.php`, `app/Http/Controllers/Api/CrudApiController.php`, `app/Http/Controllers/HomeController.php`, `public/js/farmaviva.js` e `resources/ts/farmaviva.ts`):**
+   * **Item 2 (Cargos Acessados por Outras Empresas):** Implementação do método estático `Cargo::sincronizarEntreEmpresas()` e atualização de `CrudApiController::salvarCargo()`, `CrudApiController::listarCargos()`, `CrudApiController::inicializarEstruturaEmpresa()` e `HomeController::index()` para que todo cargo cadastrado ou editado em uma empresa seja automaticamente disponibilizado e sincronizado em todas as demais empresas cadastradas.
+   * **Item 3 (Inserção de `emp_id = 2 x cargo`):** Sincronização imediata executada no banco de dados MariaDB vinculando à empresa **`emp_id = 2` (`FarmaViver II`)** todos os 5 cargos cadastrados (`Farmacêutico(a) Responsável` [`car_id=6`], `Balconista de Farmácia` [`car_id=7`], `Operador(a) de Caixa` [`car_id=8`], `Auxiliar de Limpeza` [`car_id=9`] e `Administrador` [`car_id=10`]).
+   * **Sugestões Complementares Autorizadas (A, B e C) para os Itens 2 e 3:**
+     * **Sugestão A — Sincronização Automática Bidirecional Multi-Empresa (`Cargo::sincronizarEntreEmpresas` e `CrudApiController::salvarCargo`):** Ao criar ou atualizar qualquer cargo (incluindo alteração de nome, descrição, CBO ou status ativo/inativo), o registro homônimo é criado ou atualizado automaticamente em todas as empresas.
+     * **Sugestão B — Atualização em Tempo Real do Seletor de Cargos Ativos no Modal de Funcionários (`public/js/farmaviva.js` e `resources/ts/farmaviva.ts`):** A rotina `refreshCargosTable()` filtra os cargos ativos e atualiza dinamicamente o `<select>` `#crud_fun_car_id` no modal **Gestão de Funcionários** e o badge `#badge-home-car-ativos` sem recarregar a página.
+     * **Sugestão C — Prevenção de Duplicidade de Nome de Cargo por Empresa (`emp_id` + `car_nome`):** Verificação case-insensitive (`LOWER(TRIM(car_nome))`) antes de criar ou propagar cargos, evitando registros duplicados na mesma empresa.
 
 << 13/11/2026 - Fim das Atualizações >>
