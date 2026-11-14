@@ -283,6 +283,9 @@ class CrudApiController extends Controller
 
         // Itens 2 e 3 + Sugestão A (13/11/2026): Sincroniza todos os cargos cadastrados para a empresa
         Cargo::sincronizarEntreEmpresas();
+
+        // Itens 1 e 2 + Sugestão A (14/11/2026): Sincroniza todos os períodos de escala para a empresa
+        EscalaPeriodo::sincronizarEntreEmpresas();
     }
 
     // =========================================================================
@@ -624,6 +627,9 @@ class CrudApiController extends Controller
     {
         $empId = $this->empId($request);
 
+        // Itens 1 e 2 + Sugestão A (14/11/2026): Sincroniza períodos de escala entre todas as empresas
+        EscalaPeriodo::sincronizarEntreEmpresas();
+
         return response()->json([
             'status' => 'ok',
             'data' => [
@@ -755,15 +761,72 @@ class CrudApiController extends Controller
             'esp_data_fim.after_or_equal' => 'A data final do período deve ser igual ou posterior à data inicial (chk_esp_periodo).',
         ]);
 
+        $validated['esp_descricao'] = trim($validated['esp_descricao']);
         $validated['emp_id'] = $empId;
 
         if ($id) {
             $periodo = EscalaPeriodo::findOrFail($id);
+            $descAntiga = mb_strtolower(trim($periodo->esp_descricao), 'UTF-8');
+            $iniAntigo = $periodo->esp_data_inicio instanceof \Carbon\CarbonInterface
+                ? $periodo->esp_data_inicio->format('Y-m-d')
+                : substr((string) $periodo->esp_data_inicio, 0, 10);
+            $fimAntigo = $periodo->esp_data_fim instanceof \Carbon\CarbonInterface
+                ? $periodo->esp_data_fim->format('Y-m-d')
+                : substr((string) $periodo->esp_data_fim, 0, 10);
+
             $periodo->update($validated);
-            $msg = 'Período operacional atualizado com sucesso!';
+
+            // Propaga a atualização para os períodos equivalentes nas demais empresas
+            $outrosPeriodos = EscalaPeriodo::where('esp_id', '!=', $periodo->esp_id)->get();
+            foreach ($outrosPeriodos as $outro) {
+                $descOutro = mb_strtolower(trim($outro->esp_descricao), 'UTF-8');
+                $iniOutro = $outro->esp_data_inicio instanceof \Carbon\CarbonInterface
+                    ? $outro->esp_data_inicio->format('Y-m-d')
+                    : substr((string) $outro->esp_data_inicio, 0, 10);
+                $fimOutro = $outro->esp_data_fim instanceof \Carbon\CarbonInterface
+                    ? $outro->esp_data_fim->format('Y-m-d')
+                    : substr((string) $outro->esp_data_fim, 0, 10);
+
+                if ($descOutro === $descAntiga || ($iniOutro === $iniAntigo && $fimOutro === $fimAntigo)) {
+                    $outro->update([
+                        'esp_descricao' => $validated['esp_descricao'],
+                        'esp_data_inicio' => $validated['esp_data_inicio'],
+                        'esp_data_fim' => $validated['esp_data_fim'],
+                        'esp_status' => $validated['esp_status'],
+                    ]);
+                }
+            }
+
+            EscalaPeriodo::sincronizarEntreEmpresas();
+            $msg = 'Período operacional atualizado e sincronizado entre todas as empresas!';
         } else {
-            $periodo = EscalaPeriodo::create($validated);
-            $msg = 'Novo período operacional de escala aberto com sucesso!';
+            // Sugestão C (14/11/2026): Prevenção de duplicidade por descrição ou intervalo de datas na empresa ativa
+            $chaveDesc = mb_strtolower($validated['esp_descricao'], 'UTF-8');
+            $existente = EscalaPeriodo::where('emp_id', $empId)
+                ->get()
+                ->first(function (EscalaPeriodo $p) use ($chaveDesc, $validated) {
+                    $descP = mb_strtolower(trim($p->esp_descricao), 'UTF-8');
+                    $iniP = $p->esp_data_inicio instanceof \Carbon\CarbonInterface
+                        ? $p->esp_data_inicio->format('Y-m-d')
+                        : substr((string) $p->esp_data_inicio, 0, 10);
+                    $fimP = $p->esp_data_fim instanceof \Carbon\CarbonInterface
+                        ? $p->esp_data_fim->format('Y-m-d')
+                        : substr((string) $p->esp_data_fim, 0, 10);
+
+                    return $descP === $chaveDesc
+                        || ($iniP === $validated['esp_data_inicio'] && $fimP === $validated['esp_data_fim']);
+                });
+
+            if ($existente) {
+                $existente->update($validated);
+                $periodo = $existente;
+            } else {
+                $periodo = EscalaPeriodo::create($validated);
+            }
+
+            // Item 1 + Sugestão A (14/11/2026): Replica automaticamente o período para todas as demais empresas
+            EscalaPeriodo::sincronizarEntreEmpresas();
+            $msg = 'Novo período operacional aberto e disponibilizado para todas as empresas!';
         }
 
         return response()->json([

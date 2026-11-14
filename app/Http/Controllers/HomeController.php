@@ -56,6 +56,9 @@ class HomeController extends Controller
 
         $hoje = now()->toDateString();
 
+        // Itens 1 e 2 + Sugestão A (14/11/2026): Garante que os Períodos de Escala estejam sincronizados entre todas as empresas
+        EscalaPeriodo::sincronizarEntreEmpresas();
+
         $periodos = EscalaPeriodo::where('emp_id', $empId)
             ->withCount('escalasDiarias')
             ->orderByDesc('esp_data_inicio')

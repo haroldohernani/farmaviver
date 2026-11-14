@@ -545,16 +545,36 @@
                 const bPer = document.getElementById('badge-home-per-total');
                 if (bPer) bPer.textContent = `${body.data.periodos.length} períodos`;
 
-                // Sugestão B (11/11/2026): Sincroniza Período Operacional no Gerador 5x2 e no topo da Home
+                // Sugestão B (11/11/2026 e 14/11/2026): Sincroniza Período Operacional no Gerador 5x2 e no seletor superior #select_top_esp_id
+                const optionsPeriodosHtml = body.data.periodos.map((p) => {
+                    const ini = formatBr(String(p.esp_data_inicio || '').slice(0, 10));
+                    const fim = formatBr(String(p.esp_data_fim || '').slice(0, 10));
+                    return `<option value="${p.esp_id}">${this.escapeHtml(p.esp_descricao)} (${ini} a ${fim})</option>`;
+                }).join('');
+
                 const selGerEsp = document.getElementById('ger_esp_id');
                 if (selGerEsp) {
                     const curEsp = selGerEsp.value;
-                    selGerEsp.innerHTML = body.data.periodos.map((p) => {
-                        const ini = formatBr(String(p.esp_data_inicio || '').slice(0, 10));
-                        const fim = formatBr(String(p.esp_data_fim || '').slice(0, 10));
-                        return `<option value="${p.esp_id}">${this.escapeHtml(p.esp_descricao)} (${ini} a ${fim})</option>`;
-                    }).join('');
-                    if (curEsp) selGerEsp.value = curEsp;
+                    selGerEsp.innerHTML = optionsPeriodosHtml;
+                    if (curEsp && body.data.periodos.some((p) => String(p.esp_id) === String(curEsp))) {
+                        selGerEsp.value = curEsp;
+                    }
+                }
+
+                const selTopEsp = document.getElementById('select_top_esp_id');
+                if (selTopEsp) {
+                    const curTopEsp = selTopEsp.value;
+                    selTopEsp.innerHTML = optionsPeriodosHtml
+                        ? optionsPeriodosHtml.replace(/<option value="(\d+)">/g, (m, idVal) => {
+                            const pObj = body.data.periodos.find((x) => String(x.esp_id) === String(idVal));
+                            const ini = pObj ? formatBr(String(pObj.esp_data_inicio || '').slice(0, 10)) : '';
+                            const fim = pObj ? formatBr(String(pObj.esp_data_fim || '').slice(0, 10)) : '';
+                            return `<option value="${idVal}" data-ini="${ini}" data-fim="${fim}">`;
+                        })
+                        : '<option value="0">Sem período cadastrado</option>';
+                    if (curTopEsp && body.data.periodos.some((p) => String(p.esp_id) === String(curTopEsp))) {
+                        selTopEsp.value = curTopEsp;
+                    }
                 }
             }
 

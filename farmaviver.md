@@ -528,3 +528,31 @@ que aos sábados todas as Empresas cadastradas tem expediente da 08 as 20hs e ao
      * **Sugestão C — Prevenção de Duplicidade de Nome de Cargo por Empresa (`emp_id` + `car_nome`):** Verificação case-insensitive (`LOWER(TRIM(car_nome))`) antes de criar ou propagar cargos, evitando registros duplicados na mesma empresa.
 
 << 13/11/2026 - Fim das Atualizações >>
+
+<< 14/11/2026 - observação >>
+1. A geração  Calendário Operacional, mas especificamente a ABA (Períodos de Escala). Quero que ao cadastrar esse Período de Escala, estes registros sejam acessados por outras empresas;
+
+2. Como já existe uma empresa com emp_id = 2, está faltando a inserção desta empresa x escalas_periodos;
+<< 14/11/2026 - fim observação >>
+
+<< 14/11/2026 - atualização realizada >>
+
+### Registro das Alterações Autorizadas em 14/11/2026 (Itens 1 e 2 + Sugestões A, B e C)
+
+1. **Item 1 — Compartilhamento Automático dos Períodos de Escala (`escalas_periodos`) entre Todas as Empresas (`app/Models/EscalaPeriodo.php`, `app/Http/Controllers/Api/CrudApiController.php` e `app/Http/Controllers/HomeController.php`):**
+   * Implementação do método estático `EscalaPeriodo::sincronizarEntreEmpresas()` em `app/Models/EscalaPeriodo.php` para garantir que todos os períodos operacionais cadastrados em qualquer empresa sejam automaticamente replicados e acessíveis por todas as empresas cadastradas na tabela `empresas`.
+   * Integração automática do sincronizador em:
+     * `CrudApiController::salvarPeriodoEscala()`: Ao criar um novo período na aba **Períodos de Escala** do modal **Calendário Operacional**, o registro é imediatamente disponibilizado para todas as empresas; ao editar um período existente, as alterações (`esp_descricao`, `esp_data_inicio`, `esp_data_fim`, `esp_status`) são propagadas para os registros equivalentes nas demais empresas.
+     * `CrudApiController::listarCalendarioOperacional()`: Garante a sincronização antes de carregar os dados do modal **Calendário Operacional**.
+     * `CrudApiController::inicializarEstruturaEmpresa()`: Garante que toda nova empresa cadastrada já receba todos os períodos de escala existentes.
+     * `HomeController::index()`: Garante que ao alternar de empresa na tela inicial, todos os períodos de escala estejam disponíveis imediatamente no seletor do topo e no Gerador 5x2.
+
+2. **Item 2 — Inserção e Sincronização de `emp_id = 2 x escalas_periodos` no Banco de Dados MariaDB (`farmaviver`):**
+   * Execução imediata da sincronização no banco de dados MariaDB vinculando à empresa **`emp_id = 2` (`FarmaViver II`)** o período operacional **`Escala Mensal Operacional - Novembro/2026`** (`esp_id = 2`, `2026-11-01` a `2026-11-30`, status `publicada`).
+
+3. **Sugestões Complementares Autorizadas (A, B e C):**
+   * **Sugestão A — Sincronização Automática Bidirecional Multi-Empresa (`EscalaPeriodo::sincronizarEntreEmpresas` e `CrudApiController::salvarPeriodoEscala`):** Criação e edição sincronizadas entre todas as lojas sem necessidade de recadastrar manualmente o mesmo período em cada filial.
+   * **Sugestão B — Atualização em Tempo Real do Seletor de Período no Topo da Home (`#select_top_esp_id`) e no Modal Gerador 5x2 (`#ger_esp_id`) (`public/js/farmaviva.js` e `resources/ts/farmaviva.ts`):** A função `refreshCalendarioTables()` agora reconstrói dinamicamente tanto `#ger_esp_id` quanto `#select_top_esp_id` (preservando os atributos `data-ini` e `data-fim`) assim que um período é criado, editado ou excluído na aba **Períodos de Escala**.
+   * **Sugestão C — Prevenção de Duplicidade de Período por Empresa (`emp_id` + descrição/intervalo de datas):** Verificação case-insensitive da descrição (`LOWER(TRIM(esp_descricao))`) e do intervalo (`esp_data_inicio` e `esp_data_fim`) antes de inserir ou replicar registros em `escalas_periodos`, evitando períodos duplicados para uma mesma empresa.
+
+<< 14/11/2026 - Fim das Atualizações >>
