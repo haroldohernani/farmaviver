@@ -56,8 +56,9 @@ class HomeController extends Controller
 
         $hoje = now()->toDateString();
 
-        // Itens 1 e 2 + Sugestão A (14/11/2026): Garante que os Períodos de Escala estejam sincronizados entre todas as empresas
+        // Itens 1, 2 e 3 + Sugestão A (14/11/2026): Garante que os Períodos de Escala e Feriados estejam sincronizados entre todas as empresas
         EscalaPeriodo::sincronizarEntreEmpresas();
+        Feriado::sincronizarEntreEmpresas();
 
         $periodos = EscalaPeriodo::where('emp_id', $empId)
             ->withCount('escalasDiarias')
@@ -146,7 +147,7 @@ class HomeController extends Controller
             $request->session()->put('login_timestamp', now()->timestamp);
         }
         $configuracoes5x2 = ConfiguracaoEscala::where('emp_id', $empId)->orderBy('cfg_id')->get();
-        $feriados = Feriado::whereNull('emp_id')->orWhere('emp_id', $empId)->orderBy('fer_data')->get();
+        $feriados = Feriado::where('emp_id', $empId)->orderBy('fer_data')->get();
         $trocas = TrocaEscala::with(['solicitante.cargo', 'substituto.cargo', 'escalaOrigem.turno', 'escalaDestino.turno', 'aprovador'])
             ->whereHas('solicitante', fn ($q) => $q->where('emp_id', $empId))
             ->orderByDesc('tro_id')

@@ -633,7 +633,7 @@ class FarmaVivaApp {
                         <td><code>${formatBr(dtIso)}</code></td>
                         <td class="fw-bold">${this.escapeHtml(fer.fer_descricao)}</td>
                         <td><span class="badge bg-secondary">${this.escapeHtml(String(fer.fer_tipo || '').toUpperCase())}</span></td>
-                        <td>${fer.emp_id ? 'Específico da Loja' : 'Geral / Nacional'}</td>
+                        <td>Todas as Empresas</td>
                         <td class="text-end">
                             <button type="button" class="btn btn-sm btn-fv-outline btn-edit-feriado" data-json="${jsonData}">
                                 <i class="bi bi-pencil"></i>
@@ -645,6 +645,8 @@ class FarmaVivaApp {
                     </tr>
                 `;
             }).join('');
+            const bFer = document.getElementById('badge-home-fer-total');
+            if (bFer) bFer.textContent = `${dataObj.feriados.length} feriados`;
         }
     }
 

@@ -669,7 +669,7 @@
                                             <td><code>{{ $fer->fer_data->format('d/m/Y') }}</code></td>
                                             <td class="fw-bold">{{ $fer->fer_descricao }}</td>
                                             <td><span class="badge bg-secondary">{{ strtoupper($fer->fer_tipo) }}</span></td>
-                                            <td>{{ $fer->emp_id ? 'Específico da Loja' : 'Geral / Nacional' }}</td>
+                                            <td>Todas as Empresas</td>
                                             <td class="text-end">
                                                 <button type="button" class="btn btn-sm btn-fv-outline btn-edit-feriado"
                                                     data-json="{{ json_encode([

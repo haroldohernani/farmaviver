@@ -533,11 +533,13 @@ que aos sábados todas as Empresas cadastradas tem expediente da 08 as 20hs e ao
 1. A geração  Calendário Operacional, mas especificamente a ABA (Períodos de Escala). Quero que ao cadastrar esse Período de Escala, estes registros sejam acessados por outras empresas;
 
 2. Como já existe uma empresa com emp_id = 2, está faltando a inserção desta empresa x escalas_periodos;
+
+3. Após a geração do Calendário (Período de Escala - Dezembro-2026), a ABA (Feriados) não gerou os feriados do mês de Dezembro-2026 na tabela de feriados para empresa emp_id = 2.
 << 14/11/2026 - fim observação >>
 
 << 14/11/2026 - atualização realizada >>
 
-### Registro das Alterações Autorizadas em 14/11/2026 (Itens 1 e 2 + Sugestões A, B e C)
+### Registro das Alterações Autorizadas em 14/11/2026 (Itens 1, 2 e 3 + Sugestões A, B e C)
 
 1. **Item 1 — Compartilhamento Automático dos Períodos de Escala (`escalas_periodos`) entre Todas as Empresas (`app/Models/EscalaPeriodo.php`, `app/Http/Controllers/Api/CrudApiController.php` e `app/Http/Controllers/HomeController.php`):**
    * Implementação do método estático `EscalaPeriodo::sincronizarEntreEmpresas()` em `app/Models/EscalaPeriodo.php` para garantir que todos os períodos operacionais cadastrados em qualquer empresa sejam automaticamente replicados e acessíveis por todas as empresas cadastradas na tabela `empresas`.
@@ -550,9 +552,17 @@ que aos sábados todas as Empresas cadastradas tem expediente da 08 as 20hs e ao
 2. **Item 2 — Inserção e Sincronização de `emp_id = 2 x escalas_periodos` no Banco de Dados MariaDB (`farmaviver`):**
    * Execução imediata da sincronização no banco de dados MariaDB vinculando à empresa **`emp_id = 2` (`FarmaViver II`)** o período operacional **`Escala Mensal Operacional - Novembro/2026`** (`esp_id = 2`, `2026-11-01` a `2026-11-30`, status `publicada`).
 
-3. **Sugestões Complementares Autorizadas (A, B e C):**
+3. **Sugestões Complementares Autorizadas (A, B e C) para os Itens 1 e 2:**
    * **Sugestão A — Sincronização Automática Bidirecional Multi-Empresa (`EscalaPeriodo::sincronizarEntreEmpresas` e `CrudApiController::salvarPeriodoEscala`):** Criação e edição sincronizadas entre todas as lojas sem necessidade de recadastrar manualmente o mesmo período em cada filial.
    * **Sugestão B — Atualização em Tempo Real do Seletor de Período no Topo da Home (`#select_top_esp_id`) e no Modal Gerador 5x2 (`#ger_esp_id`) (`public/js/farmaviva.js` e `resources/ts/farmaviva.ts`):** A função `refreshCalendarioTables()` agora reconstrói dinamicamente tanto `#ger_esp_id` quanto `#select_top_esp_id` (preservando os atributos `data-ini` e `data-fim`) assim que um período é criado, editado ou excluído na aba **Períodos de Escala**.
    * **Sugestão C — Prevenção de Duplicidade de Período por Empresa (`emp_id` + descrição/intervalo de datas):** Verificação case-insensitive da descrição (`LOWER(TRIM(esp_descricao))`) e do intervalo (`esp_data_inicio` e `esp_data_fim`) antes de inserir ou replicar registros em `escalas_periodos`, evitando períodos duplicados para uma mesma empresa.
+
+4. **Item 3 — Geração Automática de Feriados do Período (incluindo Dezembro/2026) e Sincronização de `feriados` para `emp_id = 2` (`app/Models/Feriado.php`, `app/Http/Controllers/Api/CrudApiController.php`, `app/Http/Controllers/HomeController.php`, `resources/views/home/partials/modals.blade.php`, `public/js/farmaviva.js` e `resources/ts/farmaviva.ts`):**
+   * **Geração Automática de Feriados ao Criar/Sincronizar Período (`Feriado::gerarFeriadosDoPeriodo`):** Sempre que um **Período de Escala** é criado ou sincronizado (como `Dezembro-2026`, `2026-12-01` a `2026-12-31`), o sistema gera automaticamente os feriados compreendidos no intervalo para todas as empresas cadastradas.
+   * **Sincronização Executada no Banco (`emp_id = 1` e `emp_id = 2`):** A tabela `feriados` foi sincronizada no MariaDB para ambas as empresas, gerando para **`emp_id = 2` (`FarmaViver II`)** (e para `emp_id = 1`) os feriados de **Dezembro/2026** (`08/12/2026 — Nossa Senhora da Conceição (Padroeira de Manaus)` [`municipal`] e `25/12/2026 — Natal` [`nacional`]), além dos feriados de Novembro/2026 (`02/11`, `15/11` e `20/11`).
+   * **Sugestões Complementares Autorizadas (A, B e C) para o Item 3:**
+     * **Sugestão A — Motor Automático de Calendário de Feriados Oficiais (`Feriado::calcularPascoa` e `Feriado::obterCalendarioOficialAno`):** Cálculo automático de feriados nacionais fixos, feriados móveis baseados na Páscoa (*Carnaval*, *Sexta-Feira Santa* e *Corpus Christi*) e feriados estaduais/municipais do AM/Manaus (`05/09`, `24/10`, `08/12`) para qualquer ano/mês aberto no Calendário Operacional.
+     * **Sugestão B — Atualização Instantânea da Aba "Feriados" e Contador da Home:** Ao salvar um Período de Escala, a API retorna a quantidade de feriados gerados para o período e `refreshCalendarioTables()` atualiza imediatamente `#tbody-crud-feriados` e `#badge-home-fer-total`.
+     * **Sugestão C — Sincronização Multi-Empresa no CRUD de Feriados com Proteção de Chave Única (`uk_feriados_emp_data`):** Qualquer feriado criado, editado ou excluído na aba **Feriados** é sincronizado entre todas as empresas respeitando a constraint `uk_feriados_emp_data (emp_id, fer_data)`.
 
 << 14/11/2026 - Fim das Atualizações >>

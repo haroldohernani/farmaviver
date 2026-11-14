@@ -284,8 +284,9 @@ class CrudApiController extends Controller
         // Itens 2 e 3 + Sugestão A (13/11/2026): Sincroniza todos os cargos cadastrados para a empresa
         Cargo::sincronizarEntreEmpresas();
 
-        // Itens 1 e 2 + Sugestão A (14/11/2026): Sincroniza todos os períodos de escala para a empresa
+        // Itens 1, 2 e 3 + Sugestão A (14/11/2026): Sincroniza todos os períodos de escala e feriados para a empresa
         EscalaPeriodo::sincronizarEntreEmpresas();
+        Feriado::sincronizarEntreEmpresas();
     }
 
     // =========================================================================
@@ -627,14 +628,14 @@ class CrudApiController extends Controller
     {
         $empId = $this->empId($request);
 
-        // Itens 1 e 2 + Sugestão A (14/11/2026): Sincroniza períodos de escala entre todas as empresas
+        // Itens 1, 2 e 3 + Sugestão A (14/11/2026): Sincroniza períodos de escala e feriados entre todas as empresas
         EscalaPeriodo::sincronizarEntreEmpresas();
+        Feriado::sincronizarEntreEmpresas();
 
         return response()->json([
             'status' => 'ok',
             'data' => [
-                'feriados' => Feriado::whereNull('emp_id')
-                    ->orWhere('emp_id', $empId)
+                'feriados' => Feriado::where('emp_id', $empId)
                     ->orderBy('fer_data')
                     ->get(),
                 'configuracoes_escala' => ConfiguracaoEscala::where('emp_id', $empId)
@@ -660,20 +661,47 @@ class CrudApiController extends Controller
         ]);
 
         $dados = [
-            'emp_id' => !empty($validated['escopo_empresa']) ? $empId : null,
+            'emp_id' => $empId,
             'fer_data' => $validated['fer_data'],
-            'fer_descricao' => $validated['fer_descricao'],
+            'fer_descricao' => trim($validated['fer_descricao']),
             'fer_tipo' => $validated['fer_tipo'],
         ];
 
         try {
             if ($id) {
                 $feriado = Feriado::findOrFail($id);
+                $dataAntiga = $feriado->fer_data instanceof \Carbon\CarbonInterface
+                    ? $feriado->fer_data->format('Y-m-d')
+                    : substr((string) $feriado->fer_data, 0, 10);
+
                 $feriado->update($dados);
-                $msg = 'Feriado atualizado com sucesso!';
+
+                // Sugestão C (14/11/2026): Propaga a edição para o registro equivalente nas demais empresas
+                Feriado::where('fer_id', '!=', $feriado->fer_id)
+                    ->whereDate('fer_data', $dataAntiga)
+                    ->update([
+                        'fer_data' => $dados['fer_data'],
+                        'fer_descricao' => $dados['fer_descricao'],
+                        'fer_tipo' => $dados['fer_tipo'],
+                    ]);
+
+                Feriado::sincronizarEntreEmpresas();
+                $msg = 'Feriado atualizado e sincronizado entre todas as empresas!';
             } else {
-                $feriado = Feriado::create($dados);
-                $msg = 'Feriado cadastrado com sucesso!';
+                // Sugestão C (14/11/2026): Evita erro na chave única uk_feriados_emp_data (emp_id, fer_data)
+                $existente = Feriado::where('emp_id', $empId)
+                    ->whereDate('fer_data', $dados['fer_data'])
+                    ->first();
+
+                if ($existente) {
+                    $existente->update($dados);
+                    $feriado = $existente;
+                } else {
+                    $feriado = Feriado::create($dados);
+                }
+
+                Feriado::sincronizarEntreEmpresas();
+                $msg = 'Feriado cadastrado e sincronizado para todas as empresas!';
             }
 
             return response()->json([
@@ -692,7 +720,11 @@ class CrudApiController extends Controller
     public function excluirFeriado(int $id): JsonResponse
     {
         $feriado = Feriado::findOrFail($id);
-        $feriado->delete();
+        $dataIso = $feriado->fer_data instanceof \Carbon\CarbonInterface
+            ? $feriado->fer_data->format('Y-m-d')
+            : substr((string) $feriado->fer_data, 0, 10);
+
+        Feriado::whereDate('fer_data', $dataIso)->delete();
 
         return response()->json([
             'status' => 'ok',
@@ -798,7 +830,9 @@ class CrudApiController extends Controller
             }
 
             EscalaPeriodo::sincronizarEntreEmpresas();
-            $msg = 'Período operacional atualizado e sincronizado entre todas as empresas!';
+            $qtdFer = Feriado::gerarFeriadosDoPeriodo($validated['esp_data_inicio'], $validated['esp_data_fim']);
+            Feriado::sincronizarEntreEmpresas();
+            $msg = "Período operacional atualizado e sincronizado entre todas as empresas ({$qtdFer} feriado(s) do período sincronizado(s) na aba Feriados)!";
         } else {
             // Sugestão C (14/11/2026): Prevenção de duplicidade por descrição ou intervalo de datas na empresa ativa
             $chaveDesc = mb_strtolower($validated['esp_descricao'], 'UTF-8');
@@ -824,9 +858,11 @@ class CrudApiController extends Controller
                 $periodo = EscalaPeriodo::create($validated);
             }
 
-            // Item 1 + Sugestão A (14/11/2026): Replica automaticamente o período para todas as demais empresas
+            // Itens 1, 2 e 3 + Sugestão A (14/11/2026): Replica automaticamente o período e gera os feriados do mês para todas as empresas
             EscalaPeriodo::sincronizarEntreEmpresas();
-            $msg = 'Novo período operacional aberto e disponibilizado para todas as empresas!';
+            $qtdFer = Feriado::gerarFeriadosDoPeriodo($validated['esp_data_inicio'], $validated['esp_data_fim']);
+            Feriado::sincronizarEntreEmpresas();
+            $msg = "Novo período operacional aberto e disponibilizado para todas as empresas ({$qtdFer} feriado(s) do período gerado(s) na aba Feriados)!";
         }
 
         return response()->json([
