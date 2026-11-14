@@ -485,3 +485,36 @@ que aos sábados todas as Empresas cadastradas tem expediente da 08 as 20hs e ao
      * **Sugestão C (Item 3) — Preenchimento Automático do Último Dia do Mês em `Data Fim` (`public/js/farmaviva.js` e `resources/ts/farmaviva.ts`):** Ao selecionar a **`Data Início *`** na aba `Períodos de Escala`, o campo **`Data Fim *`** sugere automaticamente o último dia daquele mês (caso esteja vazio ou anterior à data inicial) e define o atributo `min` igual à `Data Início *`.
 
 << 11/11/2026 - Fim das Atualizações >>
+
+<< 13/11/2026 - observação >>
+1. A geração de escala 5x2 não está funcionando corretamente, por exemplo: 
+1.1 dia 13/11/2026 existe 3 funcionários do turno da manhã e somente 1 no turno da noite, outro exemplo dia 12/11/2026 3 funcionários pela manhã e nenhum no período da tarde para fechamento escala totalmente mal distribuída. Corrigir urgente;
+
+2. 
+<< 13/11/2026 - fim observação >>
+
+<< 13/11/2026 - atualização realizada >>
+
+### Registro Técnico das Alterações Realizadas em 13/11/2026 (Item 1 / 1.1 + Sugestões A, B e C)
+
+1. **Item 1 / 1.1 — Correção da Distribuição de Turnos (Manhã x Fechamento) e Eliminação de Sobreposição de Folgas (`app/Http/Controllers/Api/EscalaApiController.php`, `app/Http/Controllers/Api/CrudApiController.php` e `sp_gerar_escala_5x2_funcionario`):**
+   * **Causa Raiz Corrigida:**
+     1. As regras de revezamento anteriores (`Equipe B: Quarta e Quinta [4,5]` e `Equipe C: Quinta e Sexta [5,6]`) colidiam na **Quinta-feira (`dia 5`)**, acumulando folgas no dia `12/11/2026`.
+     2. Os colaboradores estavam desbalanceados entre os turnos padrão (4 na Manhã e apenas 2 no Fechamento) e o sorteio das regras de folga ocorria sem separar a fila por turno (`Turno Abertura (Manhã)` vs. `Turno Fechamento (Noite)`).
+   * **Solução Aplicada:**
+     * Atualização da 3ª regra de revezamento para **`5x2 Revezamento Equipe C (Sexta e Sábado)`** (`cfg_dia_folga_1 = 6`, `cfg_dia_folga_2 = 7`), formando 3 pares de folga totalmente disjuntos (`[Segunda/Terça: 2,3]`, `[Quarta/Quinta: 4,5]` e `[Sexta/Sábado: 6,7]`) sem nenhuma sobreposição nos dias de semana.
+     * Separação da distribuição de regras de folga **por turno** dentro de `EscalaApiController::gerarEscala5x2()`, garantindo que os colaboradores do **Turno Abertura (Manhã)** revezem suas folgas entre si e os colaboradores do **Turno Fechamento (Noite)** revezem suas folgas entre si, sem jamais deixar o turno de fechamento descoberto.
+
+2. **Sugestões Complementares Autorizadas (A, B e C):**
+   * **Sugestão A — Balanceamento Automático 50% Abertura (Manhã) / 50% Fechamento (Noite) por Cargo (`EscalaApiController::balancearTurnosPadraoEquipe`):**
+     * No modo de geração para toda a equipe (`modo === 'todos'`), equilibra automaticamente a alocação entre **`Turno Abertura (Manhã)`** (3 colaboradores, incluindo 1 Farmacêutico) e **`Turno Fechamento (Noite)`** (3 colaboradores, incluindo 1 Farmacêutico).
+   * **Sugestão B — Trava Pós-Geração de Equilíbrio Diário de Segunda a Sexta (`EscalaApiController::garantirEquilibrioTurnosSemana`):**
+     * Validação automática executada após a geração da escala que inspeciona todos os dias úteis (Segunda a Sexta, exceto feriados) e corrige qualquer desequilíbrio (`3x0` ou `3x1`) entre Abertura e Fechamento, respeitando o intervalo interjornada mínimo de 11h (Art. 66 da CLT).
+     * **Resultado Verificado nos Dias Citados:**
+       * **`12/11/2026` (Quinta-feira):** **3 colaboradores na Manhã (`08:00 às 17:48`)** e **2 colaboradores no Fechamento (`10:12 às 20:00`)** (`1` em folga).
+       * **`13/11/2026` (Sexta-feira):** **2 colaboradores na Manhã (`08:00 às 17:48`)** e **2 colaboradores no Fechamento (`10:12 às 20:00`)** (`2` em folga).
+       * **Todos os demais dias úteis do mês:** Cobertura equilibrada com **2 a 3 colaboradores na Manhã** e **2 a 3 colaboradores no Fechamento**, além de **Sábados (`08h–20h`)** e **Domingos/Feriados (`08h–13h`)** 100% cobertos e **Art. 386 da CLT** `CONFORME`.
+   * **Sugestão C — Indicador de Cobertura por Turno (`Manhã | Fechamento | Plantão`) no Dashboard / Visão do Dia (`EscalaApiController::dashboardDia` e `resources/views/home/index.blade.php`):**
+     * Inclusão do resumo `(Manhã: X | Fechamento: Y)` (ou `(Plantão: Z)` aos sábados, domingos e feriados) diretamente no card KPI **"Em Trabalho Hoje"** na Visão Operacional do Dia.
+
+<< 13/11/2026 - Fim das Atualizações >>

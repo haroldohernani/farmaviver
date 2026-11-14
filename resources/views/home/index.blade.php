@@ -331,9 +331,46 @@
                     </div>
 
                     @php
-                        $trabHoje = collect($escalaHoje)->where('esd_tipo_dia', 'trabalho')->count();
+                        $trabCollection = collect($escalaHoje)->where('esd_tipo_dia', 'trabalho');
+                        $trabHoje = $trabCollection->count();
                         $folgaHoje = collect($escalaHoje)->whereIn('esd_tipo_dia', ['folga', 'dsr'])->count();
                         $ferHoje = collect($escalaHoje)->where('esd_tipo_dia', 'feriado')->count();
+
+                        $manhaHoje = $trabCollection->filter(function ($r) {
+                            $arr = (array) $r;
+                            $desc = mb_strtolower((string) ($arr['tur_descricao'] ?? ''));
+                            $ent = substr((string) ($arr['tur_entrada'] ?? ''), 0, 5);
+                            $sai = substr((string) ($arr['tur_saida'] ?? ''), 0, 5);
+                            if ($ent === '08:00' && in_array($sai, ['13:00', '20:00'], true)) {
+                                return false;
+                            }
+                            if (str_contains($desc, 'abertura') || str_contains($desc, 'manhã') || str_contains($desc, 'manha')) {
+                                return true;
+                            }
+                            if (str_contains($desc, 'fechamento') || str_contains($desc, 'noite') || str_contains($desc, 'tarde')) {
+                                return false;
+                            }
+                            return $ent !== '' && $ent < '10:00';
+                        })->count();
+
+                        $noiteHoje = $trabCollection->filter(function ($r) {
+                            $arr = (array) $r;
+                            $desc = mb_strtolower((string) ($arr['tur_descricao'] ?? ''));
+                            $ent = substr((string) ($arr['tur_entrada'] ?? ''), 0, 5);
+                            $sai = substr((string) ($arr['tur_saida'] ?? ''), 0, 5);
+                            if ($ent === '08:00' && in_array($sai, ['13:00', '20:00'], true)) {
+                                return false;
+                            }
+                            if (str_contains($desc, 'fechamento') || str_contains($desc, 'noite') || str_contains($desc, 'tarde')) {
+                                return true;
+                            }
+                            if (str_contains($desc, 'abertura') || str_contains($desc, 'manhã') || str_contains($desc, 'manha')) {
+                                return false;
+                            }
+                            return $ent >= '10:00';
+                        })->count();
+
+                        $plantaoHoje = max(0, $trabHoje - $manhaHoje - $noiteHoje);
                     @endphp
 
                     <!-- KPIs do Dia -->
@@ -351,7 +388,16 @@
                             <div class="fv-kpi-box d-flex justify-content-between align-items-center">
                                 <div>
                                     <div class="small text-secondary">Em Trabalho Hoje</div>
-                                    <div class="h5 fw-bold mb-0 text-dark" id="kpi-dia-trabalho">{{ $trabHoje }}</div>
+                                    <div class="d-flex align-items-baseline gap-2 flex-wrap">
+                                        <span class="h5 fw-bold mb-0 text-dark" id="kpi-dia-trabalho">{{ $trabHoje }}</span>
+                                        <span class="small text-secondary" id="kpi-dia-turnos-resumo">
+                                            @if($plantaoHoje > 0 && $manhaHoje === 0 && $noiteHoje === 0)
+                                                (Plantão: {{ $plantaoHoje }})
+                                            @else
+                                                (Manhã: {{ $manhaHoje }} | Fechamento: {{ $noiteHoje }})
+                                            @endif
+                                        </span>
+                                    </div>
                                 </div>
                                 <i class="bi bi-person-check-fill fs-4 text-dark"></i>
                             </div>

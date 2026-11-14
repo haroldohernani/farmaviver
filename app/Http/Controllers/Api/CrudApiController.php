@@ -219,10 +219,10 @@ class CrudApiController extends Controller
                     'cfg_dia_folga_2' => 5,
                 ],
                 [
-                    'cfg_nome' => '5x2 Revezamento Equipe C (Quinta e Sexta)',
+                    'cfg_nome' => '5x2 Revezamento Equipe C (Sexta e Sábado)',
                     'cfg_tipo' => 'revezamento',
-                    'cfg_dia_folga_1' => 5,
-                    'cfg_dia_folga_2' => 6,
+                    'cfg_dia_folga_1' => 6,
+                    'cfg_dia_folga_2' => 7,
                 ],
                 [
                     'cfg_nome' => '5x2 Sábado e Domingo (Padrão)',

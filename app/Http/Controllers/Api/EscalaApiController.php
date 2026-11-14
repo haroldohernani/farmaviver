@@ -71,6 +71,42 @@ class EscalaApiController extends Controller
         $folga = collect($registrosDia)->whereIn('esd_tipo_dia', ['folga', 'dsr'])->values();
         $feriado = collect($registrosDia)->where('esd_tipo_dia', 'feriado')->values();
 
+        $manhaCount = $trabalhando->filter(function ($r) {
+            $arr = (array) $r;
+            $desc = mb_strtolower((string) ($arr['tur_descricao'] ?? ''));
+            $ent = substr((string) ($arr['tur_entrada'] ?? ''), 0, 5);
+            $sai = substr((string) ($arr['tur_saida'] ?? ''), 0, 5);
+            if ($ent === '08:00' && in_array($sai, ['13:00', '20:00'], true)) {
+                return false;
+            }
+            if (str_contains($desc, 'abertura') || str_contains($desc, 'manhã') || str_contains($desc, 'manha')) {
+                return true;
+            }
+            if (str_contains($desc, 'fechamento') || str_contains($desc, 'noite') || str_contains($desc, 'tarde')) {
+                return false;
+            }
+            return $ent !== '' && $ent < '10:00';
+        })->count();
+
+        $noiteCount = $trabalhando->filter(function ($r) {
+            $arr = (array) $r;
+            $desc = mb_strtolower((string) ($arr['tur_descricao'] ?? ''));
+            $ent = substr((string) ($arr['tur_entrada'] ?? ''), 0, 5);
+            $sai = substr((string) ($arr['tur_saida'] ?? ''), 0, 5);
+            if ($ent === '08:00' && in_array($sai, ['13:00', '20:00'], true)) {
+                return false;
+            }
+            if (str_contains($desc, 'fechamento') || str_contains($desc, 'noite') || str_contains($desc, 'tarde')) {
+                return true;
+            }
+            if (str_contains($desc, 'abertura') || str_contains($desc, 'manhã') || str_contains($desc, 'manha')) {
+                return false;
+            }
+            return $ent >= '10:00';
+        })->count();
+
+        $plantaoCount = max(0, $trabalhando->count() - $manhaCount - $noiteCount);
+
         return response()->json([
             'status' => 'ok',
             'data' => [
@@ -78,6 +114,9 @@ class EscalaApiController extends Controller
                 'totais' => [
                     'total_escalados' => count($registrosDia),
                     'trabalhando' => $trabalhando->count(),
+                    'manha_abertura' => $manhaCount,
+                    'noite_fechamento' => $noiteCount,
+                    'plantao_especial' => $plantaoCount,
                     'folga' => $folga->count(),
                     'feriado' => $feriado->count(),
                 ],
@@ -224,7 +263,7 @@ class EscalaApiController extends Controller
             ], 422);
         }
 
-        // Busca configurações 5x2 de revezamento (folgas na semana) para cobrir Sábados (08h-20h) e Domingos/Feriados (08h-13h)
+        // Busca configurações 5x2 de revezamento (folgas desencontradas) para cobrir Abertura/Fechamento na semana, Sábados (08h-20h) e Domingos/Feriados (08h-13h)
         $todasConfigs = ConfiguracaoEscala::where('emp_id', $empId)
             ->where('cfg_ativo', 1)
             ->orderBy('cfg_id')
@@ -234,7 +273,7 @@ class EscalaApiController extends Controller
             $f1 = (int) $c->cfg_dia_folga_1;
             $f2 = (int) $c->cfg_dia_folga_2;
             return !(in_array($f1, [1, 7], true) && in_array($f2, [1, 7], true));
-        })->pluck('cfg_id')->values()->all();
+        })->sortBy(fn (ConfiguracaoEscala $c) => (int) $c->cfg_dia_folga_1)->pluck('cfg_id')->values()->all();
 
         if (empty($configsRotacao)) {
             $configsRotacao = $todasConfigs->pluck('cfg_id')->all();
@@ -245,20 +284,45 @@ class EscalaApiController extends Controller
             && in_array((int) $cfgSelecionadaObj->cfg_dia_folga_1, [1, 7], true)
             && in_array((int) $cfgSelecionadaObj->cfg_dia_folga_2, [1, 7], true);
 
+        [$turManha, $turNoite] = $this->obterTurnosAberturaEFechamento($empId);
+
+        // Sugestão A (13/11/2026): No modo 'todos' sem turno único forçado, equilibra 50% Abertura (Manhã) e 50% Fechamento (Noite) por cargo
+        if ($validated['modo'] === 'todos' && !$turId && $turManha && $turNoite) {
+            $this->balancearTurnosPadraoEquipe($funcionarios, $turManha, $turNoite);
+        }
+
+        // Item 1 / 1.1 (13/11/2026): Separa os colaboradores por turno (Manhã vs Fechamento/Noite)
+        // para distribuir as regras de folga independentemente dentro de cada turno, sem colisão no mesmo dia útil
+        $mapaCfgPorFuncionario = [];
+        if ($cfgId === 0 || ($validated['modo'] === 'todos' && $cfgSelecionadaEhSabDom)) {
+            $porTurno = $funcionarios->groupBy(fn (Funcionario $f) => (int) ($turId ?? $f->tur_id_padrao ?? 0));
+            foreach ($porTurno as $grupoTurno) {
+                // Ordena homens primeiro para os pares [Seg/Ter] e [Qua/Qui] e mulheres para [Sex/Sáb],
+                // evitando que a compensação dominical (Art. 386) desfalque os dias de semana
+                $ordenadosNoTurno = $grupoTurno->sortBy(function (Funcionario $f) {
+                    return ($f->fun_sexo === 'M' ? '0_' : '1_') . str_pad((string) $f->fun_id, 6, '0', STR_PAD_LEFT);
+                })->values();
+
+                foreach ($ordenadosNoTurno as $idxTurno => $fItem) {
+                    $mapaCfgPorFuncionario[(int) $fItem->fun_id] = (int) $configsRotacao[$idxTurno % count($configsRotacao)];
+                }
+            }
+        }
+
         $gerados = [];
         try {
             DB::statement('SET @fv_feriado_modo = ?', [$feriadoModo]);
 
             foreach ($funcionarios as $idx => $func) {
-                if ($cfgId === 0 || ($validated['modo'] === 'todos' && $cfgSelecionadaEhSabDom)) {
-                    // Revezamento automático entre os pares de folga na semana para garantir cobertura aos Sábados e Domingos
-                    $indiceRotacao = $validated['modo'] === 'todos' ? $idx : ((int) $func->fun_id);
-                    $cfgAplicada = (int) $configsRotacao[$indiceRotacao % count($configsRotacao)];
+                if (isset($mapaCfgPorFuncionario[(int) $func->fun_id])) {
+                    $cfgAplicada = $mapaCfgPorFuncionario[(int) $func->fun_id];
+                } elseif ($cfgId === 0) {
+                    $cfgAplicada = (int) $configsRotacao[((int) $func->fun_id) % count($configsRotacao)];
                 } else {
                     $cfgAplicada = $cfgId;
                 }
 
-                // Se modo 'todos' e não foi forçado turno único, usa o turno padrão de cada colaborador
+                // Se modo 'todos' e não foi forçado turno único, usa o turno padrão equilibrado de cada colaborador
                 $turnoAplicado = $turId ?? $func->tur_id_padrao;
 
                 $this->dbService->gerarEscala5x2Funcionario(
@@ -274,11 +338,16 @@ class EscalaApiController extends Controller
             // Sugestão C (11/11/2026): Verificação pós-geração de cobertura obrigatória aos Sábados (08h-20h) e Domingos/Feriados (08h-13h)
             $this->garantirCoberturaFimDeSemanaEFeriados($espId, $empId, $feriadoModo);
 
+            // Sugestão B (13/11/2026): Trava pós-geração de equilíbrio diário entre Turno Abertura (Manhã) e Turno Fechamento (Noite) de Segunda a Sexta
+            if (!$turId && $turManha && $turNoite) {
+                $this->garantirEquilibrioTurnosSemana($espId, $empId, $turManha, $turNoite);
+            }
+
             $auditoriaMulheres = $this->dbService->consultarAuditoriaDomingosMulheres($espId);
 
             return response()->json([
                 'status' => 'ok',
-                'message' => 'Escala 5x2 gerada com sucesso para ' . count($gerados) . ' colaborador(es) (Sábado: 08h às 20h | Domingo/Feriado: 08h às 13h | CLT Art. 386)!',
+                'message' => 'Escala 5x2 gerada com sucesso para ' . count($gerados) . ' colaborador(es) (Equilíbrio Manhã/Fechamento | Sábado: 08h às 20h | Domingo/Feriado: 08h às 13h | CLT Art. 386)!',
                 'data' => [
                     'colaboradores_processados' => $gerados,
                     'auditoria_mulheres' => $auditoriaMulheres,
@@ -294,7 +363,7 @@ class EscalaApiController extends Controller
 
     /**
      * Garante que a empresa tenha os turnos especiais de Sábado (08h-20h) e Domingo/Feriado (08h-13h)
-     * e as regras de revezamento 5x2 em dias de semana para cobertura contínua da farmácia.
+     * e as regras de revezamento 5x2 sem sobreposição nos dias de semana.
      */
     protected function garantirEstruturaTurnosERegras(int $empId): void
     {
@@ -334,10 +403,21 @@ class EscalaApiController extends Controller
             ]);
         }
 
+        // Atualiza eventual regra antiga "Equipe C (Quinta e Sexta)" [5,6] que colidia na Quinta-feira com a Equipe B [4,5]
+        ConfiguracaoEscala::where('emp_id', $empId)
+            ->where('cfg_dia_folga_1', 5)
+            ->where('cfg_dia_folga_2', 6)
+            ->update([
+                'cfg_nome' => '5x2 Revezamento Equipe C (Sexta e Sábado)',
+                'cfg_tipo' => 'revezamento',
+                'cfg_dia_folga_1' => 6,
+                'cfg_dia_folga_2' => 7,
+            ]);
+
         $regrasSemana = [
             ['cfg_nome' => '5x2 Revezamento Equipe A (Segunda e Terça)', 'cfg_tipo' => 'revezamento', 'f1' => 2, 'f2' => 3],
             ['cfg_nome' => '5x2 Revezamento Equipe B (Quarta e Quinta)', 'cfg_tipo' => 'revezamento', 'f1' => 4, 'f2' => 5],
-            ['cfg_nome' => '5x2 Revezamento Equipe C (Quinta e Sexta)', 'cfg_tipo' => 'revezamento', 'f1' => 5, 'f2' => 6],
+            ['cfg_nome' => '5x2 Revezamento Equipe C (Sexta e Sábado)', 'cfg_tipo' => 'revezamento', 'f1' => 6, 'f2' => 7],
         ];
 
         foreach ($regrasSemana as $r) {
@@ -360,6 +440,229 @@ class EscalaApiController extends Controller
                     'cfg_dia_folga_2' => $r['f2'],
                     'cfg_ativo' => true,
                 ]);
+            }
+        }
+    }
+
+    /**
+     * Identifica os IDs do Turno Abertura (Manhã) e Turno Fechamento (Noite) regulares de Segunda a Sexta.
+     */
+    protected function obterTurnosAberturaEFechamento(int $empId): array
+    {
+        $turnosSemana = TurnoHorario::where('emp_id', $empId)
+            ->where('tur_ativo', 1)
+            ->whereRaw("NOT (tur_entrada = '08:00:00' AND tur_saida IN ('13:00:00', '20:00:00'))")
+            ->orderBy('tur_entrada')
+            ->get();
+
+        if ($turnosSemana->count() < 2) {
+            return [null, null];
+        }
+
+        $turManha = (int) $turnosSemana->first()->tur_id;
+        $turNoite = (int) $turnosSemana->sortByDesc('tur_saida')->first()->tur_id;
+
+        if ($turManha === $turNoite) {
+            return [$turManha, null];
+        }
+
+        return [$turManha, $turNoite];
+    }
+
+    /**
+     * Sugestão A (13/11/2026): Equilibra 50% dos colaboradores no Turno Abertura (Manhã) e 50% no Turno Fechamento (Noite),
+     * distribuindo também por cargo (ex.: 1 Farmacêutico na Manhã e 1 no Fechamento).
+     */
+    protected function balancearTurnosPadraoEquipe($funcionarios, int $turManha, int $turNoite): void
+    {
+        $total = $funcionarios->count();
+        if ($total < 2) {
+            return;
+        }
+
+        $qtdManhaAtual = $funcionarios->filter(fn (Funcionario $f) => (int) $f->tur_id_padrao === $turManha)->count();
+        $qtdNoiteAtual = $funcionarios->filter(fn (Funcionario $f) => (int) $f->tur_id_padrao === $turNoite)->count();
+
+        // Verifica se há desequilíbrio global (> 1 de diferença) ou algum cargo com >= 2 colaboradores concentrado em um único turno
+        $precisaRebalancear = abs($qtdManhaAtual - $qtdNoiteAtual) > 1 || ($qtdManhaAtual + $qtdNoiteAtual) < $total;
+        if (!$precisaRebalancear) {
+            foreach ($funcionarios->groupBy('car_id') as $grupoCargo) {
+                if ($grupoCargo->count() >= 2) {
+                    $mCargo = $grupoCargo->filter(fn (Funcionario $f) => (int) $f->tur_id_padrao === $turManha)->count();
+                    $nCargo = $grupoCargo->filter(fn (Funcionario $f) => (int) $f->tur_id_padrao === $turNoite)->count();
+                    if ($mCargo === 0 || $nCargo === 0) {
+                        $precisaRebalancear = true;
+                        break;
+                    }
+                }
+            }
+        }
+
+        if (!$precisaRebalancear) {
+            return;
+        }
+
+        // Ordena por cargo e sexo para alternar equilibradamente entre Abertura (Manhã) e Fechamento (Noite)
+        $alocadosManha = 0;
+        $alocadosNoite = 0;
+        $metaManha = (int) ceil($total / 2);
+
+        $porCargo = $funcionarios->groupBy('car_id');
+        foreach ($porCargo as $grupoCargo) {
+            $ordenados = $grupoCargo->sortBy(function (Funcionario $f) {
+                return ($f->fun_sexo === 'M' ? '0_' : '1_') . str_pad((string) $f->fun_id, 6, '0', STR_PAD_LEFT);
+            })->values();
+
+            foreach ($ordenados as $idxCargo => $func) {
+                if ($alocadosManha < $metaManha && ($alocadosManha <= $alocadosNoite || $idxCargo % 2 === 0)) {
+                    $novoTurno = $turManha;
+                    $alocadosManha++;
+                } else {
+                    $novoTurno = $turNoite;
+                    $alocadosNoite++;
+                }
+
+                if ((int) $func->tur_id_padrao !== $novoTurno) {
+                    $func->tur_id_padrao = $novoTurno;
+                    Funcionario::where('fun_id', $func->fun_id)->update(['tur_id_padrao' => $novoTurno]);
+                }
+            }
+        }
+    }
+
+    /**
+     * Sugestão B (13/11/2026): Garante equilíbrio diário entre Turno Abertura (Manhã) e Turno Fechamento (Noite)
+     * em todos os dias úteis (Segunda a Sexta, exceto feriados), impedindo dias com 0 no fechamento ou 3x1.
+     */
+    protected function garantirEquilibrioTurnosSemana(int $espId, int $empId, int $turManha, int $turNoite): void
+    {
+        $diasSemana = DB::select("
+            SELECT
+                ed.esd_data,
+                SUM(CASE WHEN ed.esd_tipo_dia = 'trabalho' AND ed.tur_id = ? THEN 1 ELSE 0 END) AS qtd_manha,
+                SUM(CASE WHEN ed.esd_tipo_dia = 'trabalho' AND ed.tur_id = ? THEN 1 ELSE 0 END) AS qtd_noite
+            FROM escalas_diarias ed
+            LEFT JOIN feriados fer ON fer.fer_data = ed.esd_data AND (fer.emp_id IS NULL OR fer.emp_id = ?)
+            WHERE ed.esp_id = ?
+              AND DAYOFWEEK(ed.esd_data) BETWEEN 2 AND 6
+              AND fer.fer_id IS NULL
+            GROUP BY ed.esd_data
+            ORDER BY ed.esd_data ASC
+        ", [$turManha, $turNoite, $empId, $espId]);
+
+        foreach ($diasSemana as $dia) {
+            $qtdManha = (int) $dia->qtd_manha;
+            $qtdNoite = (int) $dia->qtd_noite;
+            $dataAlvo = $dia->esd_data;
+
+            // Caso 1: Fechamento (Noite) desfalcado (ex.: 3x0, 3x1, 4x1)
+            while (($qtdNoite === 0 && $qtdManha >= 2) || (($qtdManha - $qtdNoite) >= 2 && $qtdNoite < 2)) {
+                // Busca um colaborador trabalhando na Manhã naquele dia que possa assumir o Fechamento sem violar a interjornada de 11h no dia seguinte
+                $candidatos = DB::select("
+                    SELECT
+                        ed.esd_id,
+                        ed.fun_id,
+                        f.fun_sexo,
+                        ed_next.esd_tipo_dia AS next_tipo,
+                        t_next.tur_entrada AS next_entrada,
+                        DAYOFWEEK(DATE_ADD(ed.esd_data, INTERVAL 1 DAY)) AS next_dow
+                    FROM escalas_diarias ed
+                    JOIN funcionarios f ON f.fun_id = ed.fun_id
+                    LEFT JOIN escalas_diarias ed_next
+                           ON ed_next.esp_id = ed.esp_id
+                          AND ed_next.fun_id = ed.fun_id
+                          AND ed_next.esd_data = DATE_ADD(ed.esd_data, INTERVAL 1 DAY)
+                    LEFT JOIN turnohorarios t_next ON t_next.tur_id = ed_next.tur_id
+                    WHERE ed.esp_id = ?
+                      AND ed.esd_data = ?
+                      AND ed.esd_tipo_dia = 'trabalho'
+                      AND ed.tur_id = ?
+                    ORDER BY
+                        CASE WHEN ed_next.esd_tipo_dia IS NULL OR ed_next.esd_tipo_dia <> 'trabalho' THEN 0
+                             WHEN DAYOFWEEK(DATE_ADD(ed.esd_data, INTERVAL 1 DAY)) IN (1, 7) THEN 1
+                             WHEN t_next.tur_entrada >= '10:00:00' THEN 2
+                             ELSE 3 END ASC,
+                        ed.fun_id DESC
+                ", [$espId, $dataAlvo, $turManha]);
+
+                $transferido = false;
+                foreach ($candidatos as $cand) {
+                    // Se no dia seguinte trabalha às 07:00 em dia útil, sair às 23:00 hoje violaria as 11h de interjornada
+                    if ($cand->next_tipo === 'trabalho' && !in_array((int) $cand->next_dow, [1, 7], true) && $cand->next_entrada < '10:00:00') {
+                        continue;
+                    }
+
+                    try {
+                        DB::update("
+                            UPDATE escalas_diarias
+                            SET tur_id = ?,
+                                esd_observacao = 'Turno programado (Equilíbrio Fechamento)'
+                            WHERE esd_id = ?
+                        ", [$turNoite, $cand->esd_id]);
+                        $qtdManha--;
+                        $qtdNoite++;
+                        $transferido = true;
+                        break;
+                    } catch (\Throwable $ignore) {
+                        continue;
+                    }
+                }
+
+                if (!$transferido) {
+                    break;
+                }
+            }
+
+            // Caso 2: Abertura (Manhã) desfalcada (ex.: 0x3, 1x3, 1x4)
+            while (($qtdManha === 0 && $qtdNoite >= 2) || (($qtdNoite - $qtdManha) >= 2 && $qtdManha < 2)) {
+                $candidatos = DB::select("
+                    SELECT
+                        ed.esd_id,
+                        ed.fun_id,
+                        ed_prev.esd_tipo_dia AS prev_tipo,
+                        t_prev.tur_saida AS prev_saida
+                    FROM escalas_diarias ed
+                    LEFT JOIN escalas_diarias ed_prev
+                           ON ed_prev.esp_id = ed.esp_id
+                          AND ed_prev.fun_id = ed.fun_id
+                          AND ed_prev.esd_data = DATE_SUB(ed.esd_data, INTERVAL 1 DAY)
+                    LEFT JOIN turnohorarios t_prev ON t_prev.tur_id = ed_prev.tur_id
+                    WHERE ed.esp_id = ?
+                      AND ed.esd_data = ?
+                      AND ed.esd_tipo_dia = 'trabalho'
+                      AND ed.tur_id = ?
+                    ORDER BY
+                        CASE WHEN ed_prev.esd_tipo_dia IS NULL OR ed_prev.esd_tipo_dia <> 'trabalho' THEN 0
+                             WHEN t_prev.tur_saida <= '20:00:00' THEN 1
+                             ELSE 2 END ASC,
+                        ed.fun_id ASC
+                ", [$espId, $dataAlvo, $turNoite]);
+
+                $transferido = false;
+                foreach ($candidatos as $cand) {
+                    if ($cand->prev_tipo === 'trabalho' && $cand->prev_saida > '20:00:00') {
+                        continue;
+                    }
+
+                    try {
+                        DB::update("
+                            UPDATE escalas_diarias
+                            SET tur_id = ?,
+                                esd_observacao = 'Turno programado (Equilíbrio Abertura)'
+                            WHERE esd_id = ?
+                        ", [$turManha, $cand->esd_id]);
+                        $qtdNoite--;
+                        $qtdManha++;
+                        $transferido = true;
+                        break;
+                    } catch (\Throwable $ignore) {
+                        continue;
+                    }
+                }
+
+                if (!$transferido) {
+                    break;
+                }
             }
         }
     }
