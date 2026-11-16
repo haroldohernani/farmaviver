@@ -6,6 +6,7 @@ use App\Http\Controllers\Controller;
 use App\Models\ConfiguracaoEscala;
 use App\Models\EscalaDiaria;
 use App\Models\EscalaPeriodo;
+use App\Models\Feriado;
 use App\Models\Funcionario;
 use App\Models\TrocaEscala;
 use App\Models\TurnoHorario;
@@ -313,6 +314,14 @@ class EscalaApiController extends Controller
         try {
             DB::statement('SET @fv_feriado_modo = ?', [$feriadoModo]);
 
+            // Sugestão C (15/11/2026): No modo 'todos', remove registros residuais do período pertencentes a colaboradores inativos/férias/fora da escala
+            if ($validated['modo'] === 'todos') {
+                $idsAtivosEscala = $funcionarios->pluck('fun_id')->map(fn ($id) => (int) $id)->all();
+                EscalaDiaria::where('esp_id', $espId)
+                    ->whereNotIn('fun_id', $idsAtivosEscala)
+                    ->delete();
+            }
+
             foreach ($funcionarios as $idx => $func) {
                 if (isset($mapaCfgPorFuncionario[(int) $func->fun_id])) {
                     $cfgAplicada = $mapaCfgPorFuncionario[(int) $func->fun_id];
@@ -335,6 +344,10 @@ class EscalaApiController extends Controller
                 $gerados[] = $func->fun_nome;
             }
 
+            // Item 1 + Sugestão A (15/11/2026): Garante no máximo 1 funcionário de folga por dia de Segunda a Sábado (exceto feriados)
+            // e no máximo 2 funcionários de folga nos Domingos e Feriados (nunca 3), preservando o Art. 386 da CLT e o equilíbrio Manhã/Fechamento
+            $this->garantirLimitesDiariosDeFolga($espId, $empId, $feriadoModo, $turId, $turManha, $turNoite);
+
             // Sugestão C (11/11/2026): Verificação pós-geração de cobertura obrigatória aos Sábados (08h-20h) e Domingos/Feriados (08h-13h)
             $this->garantirCoberturaFimDeSemanaEFeriados($espId, $empId, $feriadoModo);
 
@@ -347,7 +360,7 @@ class EscalaApiController extends Controller
 
             return response()->json([
                 'status' => 'ok',
-                'message' => 'Escala 5x2 gerada com sucesso para ' . count($gerados) . ' colaborador(es) (Equilíbrio Manhã/Fechamento | Sábado: 08h às 20h | Domingo/Feriado: 08h às 13h | CLT Art. 386)!',
+                'message' => 'Escala 5x2 gerada com sucesso para ' . count($gerados) . ' colaborador(es) (Máx. 1 folga Seg-Sáb | Máx. 2 folgas Dom/Feriado | CLT Art. 386)!',
                 'data' => [
                     'colaboradores_processados' => $gerados,
                     'auditoria_mulheres' => $auditoriaMulheres,
@@ -415,9 +428,12 @@ class EscalaApiController extends Controller
             ]);
 
         $regrasSemana = [
-            ['cfg_nome' => '5x2 Revezamento Equipe A (Segunda e Terça)', 'cfg_tipo' => 'revezamento', 'f1' => 2, 'f2' => 3],
-            ['cfg_nome' => '5x2 Revezamento Equipe B (Quarta e Quinta)', 'cfg_tipo' => 'revezamento', 'f1' => 4, 'f2' => 5],
-            ['cfg_nome' => '5x2 Revezamento Equipe C (Sexta e Sábado)', 'cfg_tipo' => 'revezamento', 'f1' => 6, 'f2' => 7],
+            ['cfg_nome' => '5x2 Revezamento Seg (Domingo e Segunda)', 'cfg_tipo' => 'revezamento', 'f1' => 1, 'f2' => 2],
+            ['cfg_nome' => '5x2 Revezamento Ter (Domingo e Terça)',   'cfg_tipo' => 'revezamento', 'f1' => 1, 'f2' => 3],
+            ['cfg_nome' => '5x2 Revezamento Qua (Domingo e Quarta)',  'cfg_tipo' => 'revezamento', 'f1' => 1, 'f2' => 4],
+            ['cfg_nome' => '5x2 Revezamento Qui (Domingo e Quinta)',  'cfg_tipo' => 'revezamento', 'f1' => 1, 'f2' => 5],
+            ['cfg_nome' => '5x2 Revezamento Sex (Domingo e Sexta)',   'cfg_tipo' => 'revezamento', 'f1' => 1, 'f2' => 6],
+            ['cfg_nome' => '5x2 Revezamento Sáb (Domingo e Sábado)',  'cfg_tipo' => 'revezamento', 'f1' => 1, 'f2' => 7],
         ];
 
         foreach ($regrasSemana as $r) {
@@ -440,6 +456,351 @@ class EscalaApiController extends Controller
                     'cfg_dia_folga_2' => $r['f2'],
                     'cfg_ativo' => true,
                 ]);
+            }
+        }
+    }
+
+    /**
+     * Item 1 + Sugestão A (15/11/2026):
+     * Garante rigorosamente na escala gerada:
+     * 1. De Segunda a Sábado (exceto feriados): no máximo 1 funcionário de folga por dia (nunca 2),
+     *    distribuindo os 6 dias (Seg..Sáb) entre os colaboradores ativos de forma intercalada entre
+     *    Turno Abertura (Manhã) e Turno Fechamento (Noite) e separando colaboradores do mesmo cargo.
+     * 2. Nos Domingos e Feriados: no máximo 2 funcionários de folga por dia (nunca 3 ou mais),
+     *    mantendo 4 colaboradores trabalhando no plantão (08h às 13h) e garantindo 2 domingos de folga
+     *    no mês para todas as colaboradoras do sexo feminino (Art. 386 da CLT).
+     */
+    protected function garantirLimitesDiariosDeFolga(
+        int $espId,
+        int $empId,
+        string $feriadoModo = 'expediente',
+        ?int $turIdForcado = null,
+        ?int $turManha = null,
+        ?int $turNoite = null
+    ): void {
+        $periodo = EscalaPeriodo::find($espId);
+        if (!$periodo) {
+            return;
+        }
+
+        $funcsEscala = Funcionario::with('cargo')
+            ->where('emp_id', $empId)
+            ->where('fun_status', 'ativo')
+            ->whereIn('fun_id', function ($q) use ($espId) {
+                $q->select('fun_id')->from('escalas_diarias')->where('esp_id', $espId);
+            })
+            ->orderBy('fun_id')
+            ->get()
+            ->reject(fn (Funcionario $f) => $f->isAdministradorForaEscala())
+            ->values();
+
+        $totalFuncs = $funcsEscala->count();
+        if ($totalFuncs < 2) {
+            return;
+        }
+
+        $turSabado = TurnoHorario::where('emp_id', $empId)
+            ->where('tur_ativo', 1)
+            ->where('tur_entrada', '08:00:00')
+            ->where('tur_saida', '20:00:00')
+            ->value('tur_id');
+
+        $turDomFer = TurnoHorario::where('emp_id', $empId)
+            ->where('tur_ativo', 1)
+            ->where('tur_entrada', '08:00:00')
+            ->where('tur_saida', '13:00:00')
+            ->value('tur_id');
+
+        // 1. Intercala colaboradores da Manhã e do Fechamento para atribuir 1 dia exclusivo de folga de Segunda (2) a Sábado (7)
+        // Ordena cada turno colocando cargos de 1 pessoa no turno (ex.: Caixa, Farmacêutico) nos dias úteis centrais e Balconistas na Sexta/Sábado
+        $contagemPorCargo = $funcsEscala->countBy('car_id')->all();
+        $ordenarGrupoTurno = function ($colecao) use ($contagemPorCargo) {
+            return $colecao->sortBy(function (Funcionario $f) use ($contagemPorCargo) {
+                $qtdCargo = $contagemPorCargo[$f->car_id] ?? 1;
+                // Ordem: 1º cargo único (ex.: Caixa), 2º cargo duplo (ex.: Farmacêuticos), 3º cargo triplo (ex.: Balconistas)
+                return str_pad((string) $qtdCargo, 3, '0', STR_PAD_LEFT)
+                    . '_' . ($f->fun_sexo === 'M' ? '0' : '1')
+                    . '_' . str_pad((string) $f->fun_id, 6, '0', STR_PAD_LEFT);
+            })->values();
+        };
+
+        $grupoManha = $ordenarGrupoTurno(
+            $funcsEscala->filter(fn (Funcionario $f) => !$turNoite || (int) $f->tur_id_padrao !== (int) $turNoite)
+        );
+        $grupoNoite = $ordenarGrupoTurno(
+            $funcsEscala->filter(fn (Funcionario $f) => $turNoite && (int) $f->tur_id_padrao === (int) $turNoite)
+        );
+
+        $intercalados = collect();
+        $maxLen = max($grupoManha->count(), $grupoNoite->count());
+        for ($i = 0; $i < $maxLen; $i++) {
+            if (isset($grupoManha[$i])) {
+                $intercalados->push($grupoManha[$i]);
+            }
+            if (isset($grupoNoite[$i])) {
+                $intercalados->push($grupoNoite[$i]);
+            }
+        }
+
+        // Mapeia o dia exclusivo de Segunda (2) a Sábado (7) para cada colaborador (no máximo 1 colaborador por dia útil/sábado)
+        $diasSemanaDisponiveis = [2, 3, 4, 5, 6, 7];
+        $mapaDiaFolgaSemana = [];
+        foreach ($intercalados as $idx => $f) {
+            if ($idx < count($diasSemanaDisponiveis)) {
+                $mapaDiaFolgaSemana[(int) $f->fun_id] = $diasSemanaDisponiveis[$idx];
+            } else {
+                $mapaDiaFolgaSemana[(int) $f->fun_id] = null;
+            }
+        }
+
+        // 2. Identifica todos os Domingos e Feriados do período
+        $dataIni = $periodo->esp_data_inicio->format('Y-m-d');
+        $dataFim = $periodo->esp_data_fim->format('Y-m-d');
+
+        $feriadosMap = Feriado::where('emp_id', $empId)
+            ->whereBetween('fer_data', [$dataIni, $dataFim])
+            ->get()
+            ->keyBy(fn (Feriado $f) => $f->fer_data instanceof \Carbon\CarbonInterface
+                ? $f->fer_data->format('Y-m-d')
+                : substr((string) $f->fer_data, 0, 10));
+
+        $datasPeriodo = [];
+        $domingosPeriodo = [];
+        $cursor = \Carbon\Carbon::parse($dataIni);
+        $fimCarbon = \Carbon\Carbon::parse($dataFim);
+        while ($cursor->lte($fimCarbon)) {
+            $dtIso = $cursor->format('Y-m-d');
+            $dow = ((int) $cursor->dayOfWeek) + 1; // Carbon: 0=Dom..6=Sáb -> MariaDB DAYOFWEEK: 1=Dom..7=Sáb
+            $datasPeriodo[$dtIso] = $dow;
+            if ($dow === 1) {
+                $domingosPeriodo[] = $dtIso;
+            }
+            $cursor->addDay();
+        }
+
+        // 3. Planeja as folgas aos Domingos: MÁXIMO 2 funcionários de folga por domingo (nunca 3!)
+        $maxFolgasDomFer = min(2, max(1, $totalFuncs - 1));
+        $folgasPorDomingo = [];
+        foreach ($domingosPeriodo as $dtDom) {
+            $folgasPorDomingo[$dtDom] = [];
+        }
+
+        $contagemExtras = [];
+        foreach ($funcsEscala as $f) {
+            $contagemExtras[(int) $f->fun_id] = 0;
+        }
+
+        // 3.1 Garante primeiro os 2 domingos de folga no mês para cada colaboradora mulher (CLT Art. 386) sem exceder 2 folgas por domingo
+        $mulheres = $funcsEscala->where('fun_sexo', 'F')->values();
+        $qtdDomingos = count($domingosPeriodo);
+        if ($qtdDomingos > 0) {
+            foreach ($mulheres as $mIdx => $mulher) {
+                $funIdM = (int) $mulher->fun_id;
+                $metaDomingosMulher = min(2, $qtdDomingos);
+                $atribuidos = 0;
+
+                // Primeira passagem: prefere domingos não consecutivos com vaga (< 2)
+                for ($tentativa = 0; $tentativa < 2 && $atribuidos < $metaDomingosMulher; $tentativa++) {
+                    $candidatosIdx = range(0, $qtdDomingos - 1);
+                    usort($candidatosIdx, function (int $a, int $b) use ($domingosPeriodo, $folgasPorDomingo, $mIdx) {
+                        $cntA = count($folgasPorDomingo[$domingosPeriodo[$a]]);
+                        $cntB = count($folgasPorDomingo[$domingosPeriodo[$b]]);
+                        if ($cntA !== $cntB) {
+                            return $cntA <=> $cntB;
+                        }
+                        $parA = (($a + $mIdx) % 2 === 0) ? 0 : 1;
+                        $parB = (($b + $mIdx) % 2 === 0) ? 0 : 1;
+                        if ($parA !== $parB) {
+                            return $parA <=> $parB;
+                        }
+                        return $a <=> $b;
+                    });
+
+                    foreach ($candidatosIdx as $idxDom) {
+                        if ($atribuidos >= $metaDomingosMulher) {
+                            break;
+                        }
+                        $dtDom = $domingosPeriodo[$idxDom];
+                        if (count($folgasPorDomingo[$dtDom]) >= $maxFolgasDomFer) {
+                            continue;
+                        }
+                        if (in_array($funIdM, $folgasPorDomingo[$dtDom], true)) {
+                            continue;
+                        }
+                        // Na 1ª tentativa evita domingos consecutivos para a mesma colaboradora
+                        if ($tentativa === 0) {
+                            $prevDom = $idxDom > 0 ? $domingosPeriodo[$idxDom - 1] : null;
+                            $nextDom = $idxDom < ($qtdDomingos - 1) ? $domingosPeriodo[$idxDom + 1] : null;
+                            if (($prevDom && in_array($funIdM, $folgasPorDomingo[$prevDom], true))
+                                || ($nextDom && in_array($funIdM, $folgasPorDomingo[$nextDom], true))) {
+                                continue;
+                            }
+                        }
+
+                        $folgasPorDomingo[$dtDom][] = $funIdM;
+                        $contagemExtras[$funIdM]++;
+                        $atribuidos++;
+                    }
+                }
+            }
+
+            // 3.2 Preenche as vagas restantes de cada Domingo até exatamente $maxFolgasDomFer (2 folgas por domingo)
+            // priorizando os colaboradores homens (e quem tiver menos folgas extras no mês)
+            foreach ($domingosPeriodo as $dtDom) {
+                while (count($folgasPorDomingo[$dtDom]) < $maxFolgasDomFer) {
+                    $candidato = $funcsEscala
+                        ->reject(fn (Funcionario $f) => in_array((int) $f->fun_id, $folgasPorDomingo[$dtDom], true))
+                        ->sortBy(function (Funcionario $f) use ($contagemExtras) {
+                            $fid = (int) $f->fun_id;
+                            return ($f->fun_sexo === 'M' ? '0_' : '1_')
+                                . str_pad((string) ($contagemExtras[$fid] ?? 0), 4, '0', STR_PAD_LEFT)
+                                . '_' . str_pad((string) $fid, 6, '0', STR_PAD_LEFT);
+                        })
+                        ->first();
+
+                    if (!$candidato) {
+                        break;
+                    }
+
+                    $fidCand = (int) $candidato->fun_id;
+                    $folgasPorDomingo[$dtDom][] = $fidCand;
+                    $contagemExtras[$fidCand]++;
+                }
+            }
+        }
+
+        // 4. Aplica dia a dia a regra estrita:
+        //    - Segunda a Sábado (não feriado): exatamente 1 funcionário de folga
+        //    - Domingos e Feriados: exatamente 2 funcionários de folga (nunca 3)
+        foreach ($datasPeriodo as $dtIso => $dow) {
+            $feriadoObj = $feriadosMap->get($dtIso);
+            $ehFeriado = $feriadoObj !== null;
+
+            if ($dow === 1) {
+                // DOMINGO (com ou sem feriado): máximo 2 funcionários de folga e os outros 4 em trabalho (08h às 13h)
+                $idsFolgaHoje = $folgasPorDomingo[$dtIso] ?? [];
+
+                foreach ($funcsEscala as $func) {
+                    $fid = (int) $func->fun_id;
+                    if (in_array($fid, $idsFolgaHoje, true)) {
+                        $obsFolga = $func->fun_sexo === 'F'
+                            ? 'Folga dominical obrigatória (CLT Art. 386)'
+                            : 'Folga dominical 5x2 (Revezamento)';
+
+                        DB::update("
+                            UPDATE escalas_diarias
+                            SET esd_tipo_dia = 'folga',
+                                tur_id = NULL,
+                                esd_observacao = ?
+                            WHERE esp_id = ? AND fun_id = ? AND esd_data = ?
+                        ", [$obsFolga, $espId, $fid, $dtIso]);
+                    } else {
+                        $turnoDom = $turDomFer ?: ($turIdForcado ?: ($func->tur_id_padrao ?: $turManha));
+                        $obsTrab = $ehFeriado
+                            ? 'Expediente Feriado (08h às 13h): ' . $feriadoObj->fer_descricao
+                            : 'Expediente Domingo (08h às 13h)';
+
+                        DB::update("
+                            UPDATE escalas_diarias
+                            SET esd_tipo_dia = 'trabalho',
+                                tur_id = ?,
+                                esd_observacao = ?
+                            WHERE esp_id = ? AND fun_id = ? AND esd_data = ?
+                        ", [$turnoDom, $obsTrab, $espId, $fid, $dtIso]);
+                    }
+                }
+            } elseif ($ehFeriado) {
+                // FERIADO EM DIA DE SEGUNDA A SÁBADO: máximo 2 funcionários de folga (1 folguista do dia + 1 revezamento) e 4 trabalhando (08h às 13h)
+                $idsFolgaFeriado = [];
+                foreach ($funcsEscala as $func) {
+                    $fid = (int) $func->fun_id;
+                    if (($mapaDiaFolgaSemana[$fid] ?? null) === $dow) {
+                        $idsFolgaFeriado[] = $fid;
+                        break;
+                    }
+                }
+
+                while (count($idsFolgaFeriado) < $maxFolgasDomFer) {
+                    $candFer = $funcsEscala
+                        ->reject(fn (Funcionario $f) => in_array((int) $f->fun_id, $idsFolgaFeriado, true))
+                        ->sortBy(function (Funcionario $f) use ($contagemExtras) {
+                            $fid = (int) $f->fun_id;
+                            return str_pad((string) ($contagemExtras[$fid] ?? 0), 4, '0', STR_PAD_LEFT)
+                                . '_' . ($f->fun_sexo === 'M' ? '0' : '1')
+                                . '_' . str_pad((string) $fid, 6, '0', STR_PAD_LEFT);
+                        })
+                        ->first();
+
+                    if (!$candFer) {
+                        break;
+                    }
+
+                    $fidCandFer = (int) $candFer->fun_id;
+                    $idsFolgaFeriado[] = $fidCandFer;
+                    $contagemExtras[$fidCandFer]++;
+                }
+
+                foreach ($funcsEscala as $func) {
+                    $fid = (int) $func->fun_id;
+                    if (in_array($fid, $idsFolgaFeriado, true)) {
+                        $ehFolguistaDia = (($mapaDiaFolgaSemana[$fid] ?? null) === $dow);
+                        $tipoDiaFer = $ehFolguistaDia ? 'folga' : 'feriado';
+                        $obsFer = $ehFolguistaDia
+                            ? 'Folga regular 5x2 (' . $feriadoObj->fer_descricao . ')'
+                            : 'Feriado: ' . $feriadoObj->fer_descricao;
+
+                        DB::update("
+                            UPDATE escalas_diarias
+                            SET esd_tipo_dia = ?,
+                                tur_id = NULL,
+                                esd_observacao = ?
+                            WHERE esp_id = ? AND fun_id = ? AND esd_data = ?
+                        ", [$tipoDiaFer, $obsFer, $espId, $fid, $dtIso]);
+                    } else {
+                        $turnoFer = $turDomFer ?: ($turIdForcado ?: ($func->tur_id_padrao ?: $turManha));
+                        $obsTrabFer = 'Expediente Feriado (08h às 13h): ' . $feriadoObj->fer_descricao;
+
+                        DB::update("
+                            UPDATE escalas_diarias
+                            SET esd_tipo_dia = 'trabalho',
+                                tur_id = ?,
+                                esd_observacao = ?
+                            WHERE esp_id = ? AND fun_id = ? AND esd_data = ?
+                        ", [$turnoFer, $obsTrabFer, $espId, $fid, $dtIso]);
+                    }
+                }
+            } else {
+                // SEGUNDA A SÁBADO (DIA NORMAL, SEM FERIADO): no máximo 1 funcionário de folga por dia (nunca 2!)
+                foreach ($funcsEscala as $func) {
+                    $fid = (int) $func->fun_id;
+                    $ehFolgaHoje = (($mapaDiaFolgaSemana[$fid] ?? null) === $dow);
+
+                    if ($ehFolgaHoje) {
+                        DB::update("
+                            UPDATE escalas_diarias
+                            SET esd_tipo_dia = 'folga',
+                                tur_id = NULL,
+                                esd_observacao = 'Folga regular 5x2'
+                            WHERE esp_id = ? AND fun_id = ? AND esd_data = ?
+                        ", [$espId, $fid, $dtIso]);
+                    } else {
+                        if ($dow === 7) {
+                            $turnoDia = $turSabado ?: ($turIdForcado ?: ($func->tur_id_padrao ?: $turManha));
+                            $obsDia = 'Expediente Sábado (08h às 20h)';
+                        } else {
+                            $turnoDia = $turIdForcado ?: ($func->tur_id_padrao ?: $turManha);
+                            $obsDia = 'Turno programado';
+                        }
+
+                        DB::update("
+                            UPDATE escalas_diarias
+                            SET esd_tipo_dia = 'trabalho',
+                                tur_id = ?,
+                                esd_observacao = ?
+                            WHERE esp_id = ? AND fun_id = ? AND esd_data = ?
+                        ", [$turnoDia, $obsDia, $espId, $fid, $dtIso]);
+                    }
+                }
             }
         }
     }
@@ -819,6 +1180,46 @@ class EscalaApiController extends Controller
 
         if ($validated['esd_tipo_dia'] !== 'trabalho') {
             $validated['tur_id'] = null;
+
+            // Sugestão B (15/11/2026): Trava preventiva de limite diário de folgas na edição manual
+            // - Segunda a Sábado (exceto feriados): máximo 1 funcionário de folga
+            // - Domingos e Feriados: máximo 2 funcionários de folga (nunca 3 ou mais)
+            $dataAlvoIso = $escalaDia->esd_data instanceof \Carbon\CarbonInterface
+                ? $escalaDia->esd_data->format('Y-m-d')
+                : substr((string) $escalaDia->esd_data, 0, 10);
+            $dowAlvo = ((int) \Carbon\Carbon::parse($dataAlvoIso)->dayOfWeek) + 1;
+
+            $empIdPeriodo = (int) (EscalaPeriodo::where('esp_id', $escalaDia->esp_id)->value('emp_id') ?: $this->empId($request));
+            $ehFeriadoAlvo = Feriado::where('emp_id', $empIdPeriodo)
+                ->whereDate('fer_data', $dataAlvoIso)
+                ->exists();
+
+            $outrosEmFolga = EscalaDiaria::with('funcionario')
+                ->where('esp_id', $escalaDia->esp_id)
+                ->whereDate('esd_data', $dataAlvoIso)
+                ->where('esd_id', '!=', $escalaDia->esd_id)
+                ->whereIn('esd_tipo_dia', ['folga', 'dsr', 'feriado'])
+                ->get();
+
+            $nomesEmFolga = $outrosEmFolga
+                ->map(fn (EscalaDiaria $d) => $d->funcionario?->fun_nome ?? ('#' . $d->fun_id))
+                ->implode(', ');
+
+            if ($dowAlvo === 1 || $ehFeriadoAlvo) {
+                if ($outrosEmFolga->count() >= 2) {
+                    return response()->json([
+                        'status' => 'error',
+                        'message' => "Regra de Escala 5x2: Nos domingos e feriados só é permitido no máximo 2 funcionários de folga por dia (nunca 3 ou mais). Já estão de folga nesta data: {$nomesEmFolga}.",
+                    ], 422);
+                }
+            } else {
+                if ($outrosEmFolga->count() >= 1) {
+                    return response()->json([
+                        'status' => 'error',
+                        'message' => "Regra de Escala 5x2: De segunda a sábado (exceto feriados) não pode haver 2 funcionários de folga no mesmo dia. Já está de folga nesta data: {$nomesEmFolga}.",
+                    ], 422);
+                }
+            }
         }
 
         try {

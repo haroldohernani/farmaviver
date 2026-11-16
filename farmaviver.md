@@ -535,6 +535,8 @@ que aos sábados todas as Empresas cadastradas tem expediente da 08 as 20hs e ao
 2. Como já existe uma empresa com emp_id = 2, está faltando a inserção desta empresa x escalas_periodos;
 
 3. Após a geração do Calendário (Período de Escala - Dezembro-2026), a ABA (Feriados) não gerou os feriados do mês de Dezembro-2026 na tabela de feriados para empresa emp_id = 2.
+
+4. Não pode haver folga seguida mais de 2x no mês do mesmo funcionário
 << 14/11/2026 - fim observação >>
 
 << 14/11/2026 - atualização realizada >>
@@ -564,5 +566,27 @@ que aos sábados todas as Empresas cadastradas tem expediente da 08 as 20hs e ao
      * **Sugestão A — Motor Automático de Calendário de Feriados Oficiais (`Feriado::calcularPascoa` e `Feriado::obterCalendarioOficialAno`):** Cálculo automático de feriados nacionais fixos, feriados móveis baseados na Páscoa (*Carnaval*, *Sexta-Feira Santa* e *Corpus Christi*) e feriados estaduais/municipais do AM/Manaus (`05/09`, `24/10`, `08/12`) para qualquer ano/mês aberto no Calendário Operacional.
      * **Sugestão B — Atualização Instantânea da Aba "Feriados" e Contador da Home:** Ao salvar um Período de Escala, a API retorna a quantidade de feriados gerados para o período e `refreshCalendarioTables()` atualiza imediatamente `#tbody-crud-feriados` e `#badge-home-fer-total`.
      * **Sugestão C — Sincronização Multi-Empresa no CRUD de Feriados com Proteção de Chave Única (`uk_feriados_emp_data`):** Qualquer feriado criado, editado ou excluído na aba **Feriados** é sincronizado entre todas as empresas respeitando a constraint `uk_feriados_emp_data (emp_id, fer_data)`.
-
 << 14/11/2026 - Fim das Atualizações >>
+
+<< 15/11/2026 - Início da Observação >>
+1. Ao gerar a escala 5x2 não pode haver 2 funcionários de folga no mesmo dia, somente nos feriados e domingos;
+<< 15/11/2026 - Fim das Observação >>
+
+<< 15/11/2026 - atualização realizada >>
+
+### Registro das Alterações Autorizadas em 15/11/2026 (Item 1 + Sugestões A, B e C)
+
+1. **Item 1 + Sugestão A — Regra Estrita de Limite Diário de Folgas na Geração da Escala 5x2 (`app/Http/Controllers/Api/EscalaApiController.php`):**
+   * Implementação do método `garantirLimitesDiariosDeFolga()` integrado ao fluxo `EscalaApiController::gerarEscala5x2()`, assegurando rigorosamente:
+     * **De Segunda a Sábado (exceto feriados):** No máximo **1 funcionário de folga por dia** (`0` ou `1` folga, **jamais 2 ou mais**). Com os **6 colaboradores ativos** (`Dra. Camila Nogueira`, `Bruno Siqueira`, `Larissa Mendes`, `Eduardo Costa`, `Funcionário I` e `Dr. Funcionário II`), cada colaborador recebe um dia fixo e exclusivo de folga de segunda a sábado (`Seg`, `Ter`, `Qua`, `Qui`, `Sex`, `Sáb`), mantendo **5 colaboradores trabalhando todos os dias** (`2x3` ou `3x2` entre Turno Abertura/Manhã e Turno Fechamento/Noite de segunda a sexta, e `5` trabalhando no Expediente Sábado `08h às 20h`), sem jamais deixar os 2 Farmacêuticos de folga no mesmo dia.
+     * **Nos Domingos e Feriados:** No máximo **2 funcionários de folga por dia** (**jamais 3 ou mais**), mantendo **4 colaboradores trabalhando no plantão (`08h às 13h`)** e garantindo que todas as **3 colaboradoras do sexo feminino** (`Dra. Camila Nogueira`, `Larissa Mendes` e `Funcionário I`) usufruam de **2 domingos de folga no mês** (`CONFORME` Art. 386 da CLT na view `vw_auditoria_folgas_domingo_mulheres`).
+
+2. **Sugestão B — Trava Preventiva na Edição Manual de Dia da Escala (`EscalaApiController::atualizarEscalaDiaria`):**
+   * Validação automática ao alterar manualmente um dia para `folga`, `dsr` ou `feriado`:
+     * Em dias de **Segunda a Sábado (não feriados)**, bloqueia caso já exista **1 funcionário** de folga na data.
+     * Em **Domingos e Feriados**, bloqueia caso já existam **2 funcionários** de folga na data (impedindo uma 3ª folga).
+
+3. **Sugestão C — Sincronização das 6 Regras Individuais 5x2, Higienização de Inativos e Regeração de Novembro/2026 e Dezembro/2026:**
+   * Atualização de `garantirEstruturaTurnosERegras()` com as 6 regras individuais de revezamento (`Domingo e Segunda` a `Domingo e Sábado`), limpeza automática de registros residuais de colaboradores fora da escala no modo em lote (`todos`) e regeração completa das escalas de **Novembro/2026** (`esp_id = 1`) e **Dezembro/2026** (`esp_id = 3`) com **0 violações** em todos os dias dos dois meses.
+
+<< 15/11/2026 - Fim das Atualizações >>
