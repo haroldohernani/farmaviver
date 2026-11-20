@@ -553,11 +553,12 @@ class EscalaApiController extends Controller
             }
         }
 
-        // 2. Identifica todos os Domingos e Feriados do período
+        // 2. Identifica todos os Domingos e Feriados ATIVOS (fer_status = 1) do período (Item 2 - 17/11/2026)
         $dataIni = $periodo->esp_data_inicio->format('Y-m-d');
         $dataFim = $periodo->esp_data_fim->format('Y-m-d');
 
         $feriadosMap = Feriado::where('emp_id', $empId)
+            ->where('fer_status', 1)
             ->whereBetween('fer_data', [$dataIni, $dataFim])
             ->get()
             ->keyBy(fn (Feriado $f) => $f->fer_data instanceof \Carbon\CarbonInterface
@@ -1051,10 +1052,10 @@ class EscalaApiController extends Controller
         }
 
         // 1. Garante que todo registro de TRABALHO aos Sábados use o turno 08h-20h
-        // e todo registro de TRABALHO aos Domingos ou Feriados use o turno 08h-13h
+        // e todo registro de TRABALHO aos Domingos ou Feriados ativos (fer_status = 1) use o turno 08h-13h
         DB::statement("
             UPDATE escalas_diarias ed
-            LEFT JOIN feriados fer ON fer.fer_data = ed.esd_data AND (fer.emp_id IS NULL OR fer.emp_id = ?)
+            LEFT JOIN feriados fer ON fer.fer_data = ed.esd_data AND fer.fer_status = 1 AND (fer.emp_id IS NULL OR fer.emp_id = ?)
             SET ed.tur_id = ?,
                 ed.esd_observacao = 'Expediente Sábado (08h às 20h)'
             WHERE ed.esp_id = ?
@@ -1066,7 +1067,7 @@ class EscalaApiController extends Controller
 
         DB::statement("
             UPDATE escalas_diarias ed
-            LEFT JOIN feriados fer ON fer.fer_data = ed.esd_data AND (fer.emp_id IS NULL OR fer.emp_id = ?)
+            LEFT JOIN feriados fer ON fer.fer_data = ed.esd_data AND fer.fer_status = 1 AND (fer.emp_id IS NULL OR fer.emp_id = ?)
             SET ed.tur_id = ?,
                 ed.esd_observacao = CASE
                     WHEN fer.fer_id IS NOT NULL THEN CONCAT('Expediente Feriado (08h às 13h): ', COALESCE(fer.fer_descricao, 'Feriado'))
@@ -1078,7 +1079,7 @@ class EscalaApiController extends Controller
               AND ed.tur_id <> ?
         ", [$empId, $turDomFer, $espId, $turDomFer]);
 
-        // 2. Verifica se algum Sábado, Domingo ou Feriado (com expediente) ficou sem nenhum colaborador em TRABALHO
+        // 2. Verifica se algum Sábado, Domingo ou Feriado ativo (fer_status = 1) ficou sem nenhum colaborador em TRABALHO
         $datasSemCobertura = DB::select("
             SELECT
                 ed.esd_data,
@@ -1087,7 +1088,7 @@ class EscalaApiController extends Controller
                 MAX(fer.fer_descricao) AS desc_feriado,
                 SUM(CASE WHEN ed.esd_tipo_dia = 'trabalho' THEN 1 ELSE 0 END) AS total_trabalhando
             FROM escalas_diarias ed
-            LEFT JOIN feriados fer ON fer.fer_data = ed.esd_data AND (fer.emp_id IS NULL OR fer.emp_id = ?)
+            LEFT JOIN feriados fer ON fer.fer_data = ed.esd_data AND fer.fer_status = 1 AND (fer.emp_id IS NULL OR fer.emp_id = ?)
             WHERE ed.esp_id = ?
             GROUP BY ed.esd_data
             HAVING total_trabalhando = 0
@@ -1191,6 +1192,7 @@ class EscalaApiController extends Controller
 
             $empIdPeriodo = (int) (EscalaPeriodo::where('esp_id', $escalaDia->esp_id)->value('emp_id') ?: $this->empId($request));
             $ehFeriadoAlvo = Feriado::where('emp_id', $empIdPeriodo)
+                ->where('fer_status', 1)
                 ->whereDate('fer_data', $dataAlvoIso)
                 ->exists();
 

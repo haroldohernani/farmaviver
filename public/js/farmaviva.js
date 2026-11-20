@@ -625,17 +625,20 @@
             if (tbodyFer && Array.isArray(body.data.feriados)) {
                 tbodyFer.innerHTML = body.data.feriados.map((fer) => {
                     const dtIso = String(fer.fer_data || '').slice(0, 10);
+                    const ferAtivo = Number(fer.fer_status ?? 1) === 1;
                     const jsonData = this.escapeHtml(JSON.stringify({
                         fer_id: fer.fer_id,
                         fer_data: dtIso,
                         fer_descricao: fer.fer_descricao,
                         fer_tipo: fer.fer_tipo,
+                        fer_status: ferAtivo ? 1 : 0,
                     }));
                     return `
                         <tr>
                             <td><code>${formatBr(dtIso)}</code></td>
                             <td class="fw-bold">${this.escapeHtml(fer.fer_descricao)}</td>
                             <td><span class="badge bg-secondary">${this.escapeHtml(String(fer.fer_tipo || '').toUpperCase())}</span></td>
+                            <td><span class="badge ${ferAtivo ? 'bg-dark' : 'bg-light text-muted border'}">${ferAtivo ? 'ATIVO' : 'INATIVO'}</span></td>
                             <td>Todas as Empresas</td>
                             <td class="text-end">
                                 <button type="button" class="btn btn-sm btn-fv-outline btn-edit-feriado" data-json="${jsonData}">
@@ -649,7 +652,8 @@
                     `;
                 }).join('');
                 const bFer = document.getElementById('badge-home-fer-total');
-                if (bFer) bFer.textContent = `${body.data.feriados.length} feriados`;
+                const ativosFer = body.data.feriados.filter((f) => Number(f.fer_status ?? 1) === 1).length;
+                if (bFer) bFer.textContent = `${ativosFer} feriados`;
             }
         }
 
@@ -1047,10 +1051,15 @@
             const tbodyFer = document.getElementById('tbody-crud-feriados');
             if (formFer) {
                 const idFer = document.getElementById('crud_fer_id');
+                const statusFer = document.getElementById('crud_fer_status');
                 const btnSalvarFer = document.getElementById('btn-salvar-feriado');
                 const limparFer = () => {
                     formFer.reset();
                     idFer.value = '';
+                    if (statusFer) {
+                        statusFer.value = '1';
+                        statusFer.disabled = true;
+                    }
                     if (btnSalvarFer) {
                         btnSalvarFer.innerHTML = '<i class="bi bi-check-lg me-1"></i>Salvar';
                     }
@@ -1067,6 +1076,10 @@
                             document.getElementById('crud_fer_data').value = d.fer_data || '';
                             document.getElementById('crud_fer_descricao').value = d.fer_descricao || '';
                             document.getElementById('crud_fer_tipo').value = d.fer_tipo || 'nacional';
+                            if (statusFer) {
+                                statusFer.disabled = false;
+                                statusFer.value = String(d.fer_status !== undefined ? d.fer_status : 1);
+                            }
                             if (btnSalvarFer) {
                                 btnSalvarFer.innerHTML = '<i class="bi bi-check-lg me-1"></i>Atualizar';
                             }
@@ -1096,6 +1109,7 @@
                         fer_data: document.getElementById('crud_fer_data').value,
                         fer_descricao: document.getElementById('crud_fer_descricao').value.trim(),
                         fer_tipo: document.getElementById('crud_fer_tipo').value,
+                        fer_status: statusFer ? Number(statusFer.value) : 1,
                     };
                     const { ok, body } = await this.apiRequest(id ? `/api/feriados/${id}` : '/api/feriados', id ? 'PUT' : 'POST', payload);
                     this.showAlert('alert-modal-calendario', ok ? 'success' : 'danger', body.message);

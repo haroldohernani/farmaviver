@@ -622,17 +622,20 @@ class FarmaVivaApp {
         if (tbodyFer && Array.isArray(dataObj.feriados)) {
             tbodyFer.innerHTML = dataObj.feriados.map((fer: Record<string, any>) => {
                 const dtIso = String(fer.fer_data || '').slice(0, 10);
+                const ferAtivo = Number(fer.fer_status ?? 1) === 1;
                 const jsonData = this.escapeHtml(JSON.stringify({
                     fer_id: fer.fer_id,
                     fer_data: dtIso,
                     fer_descricao: fer.fer_descricao,
                     fer_tipo: fer.fer_tipo,
+                    fer_status: ferAtivo ? 1 : 0,
                 }));
                 return `
                     <tr>
                         <td><code>${formatBr(dtIso)}</code></td>
                         <td class="fw-bold">${this.escapeHtml(fer.fer_descricao)}</td>
                         <td><span class="badge bg-secondary">${this.escapeHtml(String(fer.fer_tipo || '').toUpperCase())}</span></td>
+                        <td><span class="badge ${ferAtivo ? 'bg-dark' : 'bg-light text-muted border'}">${ferAtivo ? 'ATIVO' : 'INATIVO'}</span></td>
                         <td>Todas as Empresas</td>
                         <td class="text-end">
                             <button type="button" class="btn btn-sm btn-fv-outline btn-edit-feriado" data-json="${jsonData}">
@@ -646,7 +649,8 @@ class FarmaVivaApp {
                 `;
             }).join('');
             const bFer = document.getElementById('badge-home-fer-total');
-            if (bFer) bFer.textContent = `${dataObj.feriados.length} feriados`;
+            const ativosFer = dataObj.feriados.filter((f: Record<string, any>) => Number(f.fer_status ?? 1) === 1).length;
+            if (bFer) bFer.textContent = `${ativosFer} feriados`;
         }
     }
 
@@ -1045,10 +1049,15 @@ class FarmaVivaApp {
         const tbodyFer = document.getElementById('tbody-crud-feriados');
         if (formFer) {
             const idFer = document.getElementById('crud_fer_id') as HTMLInputElement;
+            const statusFer = document.getElementById('crud_fer_status') as HTMLSelectElement | null;
             const btnSalvarFer = document.getElementById('btn-salvar-feriado');
             const limparFer = (): void => {
                 formFer.reset();
                 idFer.value = '';
+                if (statusFer) {
+                    statusFer.value = '1';
+                    statusFer.disabled = true;
+                }
                 if (btnSalvarFer) {
                     btnSalvarFer.innerHTML = '<i class="bi bi-check-lg me-1"></i>Salvar';
                 }
@@ -1064,6 +1073,10 @@ class FarmaVivaApp {
                     (document.getElementById('crud_fer_data') as HTMLInputElement).value = d.fer_data || '';
                     (document.getElementById('crud_fer_descricao') as HTMLInputElement).value = d.fer_descricao || '';
                     (document.getElementById('crud_fer_tipo') as HTMLSelectElement).value = d.fer_tipo || 'nacional';
+                    if (statusFer) {
+                        statusFer.disabled = false;
+                        statusFer.value = String(d.fer_status !== undefined ? d.fer_status : 1);
+                    }
                     if (btnSalvarFer) {
                         btnSalvarFer.innerHTML = '<i class="bi bi-check-lg me-1"></i>Atualizar';
                     }
@@ -1092,6 +1105,7 @@ class FarmaVivaApp {
                     fer_data: (document.getElementById('crud_fer_data') as HTMLInputElement).value,
                     fer_descricao: (document.getElementById('crud_fer_descricao') as HTMLInputElement).value.trim(),
                     fer_tipo: (document.getElementById('crud_fer_tipo') as HTMLSelectElement).value,
+                    fer_status: statusFer ? Number(statusFer.value) : 1,
                 };
                 const { ok, body } = await this.apiRequest(id ? `/api/feriados/${id}` : '/api/feriados', id ? 'PUT' : 'POST', payload);
                 this.showAlert('alert-modal-calendario', ok ? 'success' : 'danger', body.message);

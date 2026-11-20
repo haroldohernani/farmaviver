@@ -588,5 +588,35 @@ que aos sábados todas as Empresas cadastradas tem expediente da 08 as 20hs e ao
 
 3. **Sugestão C — Sincronização das 6 Regras Individuais 5x2, Higienização de Inativos e Regeração de Novembro/2026 e Dezembro/2026:**
    * Atualização de `garantirEstruturaTurnosERegras()` com as 6 regras individuais de revezamento (`Domingo e Segunda` a `Domingo e Sábado`), limpeza automática de registros residuais de colaboradores fora da escala no modo em lote (`todos`) e regeração completa das escalas de **Novembro/2026** (`esp_id = 1`) e **Dezembro/2026** (`esp_id = 3`) com **0 violações** em todos os dias dos dois meses.
-
 << 15/11/2026 - Fim das Atualizações >>
+
+<< 17/11/2026 observação >>
+1. No módulo Calendário e Feriados, na Aba *Feriados* acrescentei na tabela feriados o campo fer_status (1 - Ativo e 0 - Inativo). Então ao clicar na ação alterar do registro específico habilitar o campo para edição, conforme os outros campos que são para edição;
+
+2. Quando Gerar escala 5x2 levar em consideração somente feriados com status = 1 (Ativo);
+<< 17/11/2026 fim da observação >>
+
+<< 17/11/2026 - atualização realizada >>
+
+### Registro das Alterações Autorizadas da Tag 17/11/2026 (Itens 1 e 2 + Sugestões A, B e C)
+
+1. **Item 1 + Sugestão A — Campo `fer_status` (`1 - Ativo` e `0 - Inativo`) na Aba "Feriados" Habilitado na Ação Alterar (`app/Models/Feriado.php`, `app/Http/Controllers/Api/CrudApiController.php`, `resources/views/home/partials/modals.blade.php`, `public/js/farmaviva.js` e `resources/ts/farmaviva.ts`):**
+   * Mapeamento do campo `fer_status` (`int(1) DEFAULT 1`) em `app/Models/Feriado.php` (`$fillable` e `$casts`) e validação/persistência em `CrudApiController::salvarFeriado()`.
+   * Inclusão do seletor **Status \*** (`#crud_fer_status` com as opções `1 - Ativo` e `0 - Inativo`) no formulário `#form-crud-feriado` e da coluna **Status** na tabela `#tbody-crud-feriados`.
+   * Comportamento na interface (**Sugestão A**): para novos cadastros o campo `#crud_fer_status` permanece padronizado em `1 - Ativo` (`disabled`), e ao clicar no botão **Alterar (lápis)** (`.btn-edit-feriado`) de um registro específico, o campo `#crud_fer_status` é habilitado para edição (`disabled = false`) e preenchido com o status atual do registro (`1` ou `0`), retornando ao estado padrão após salvar ou limpar.
+
+2. **Item 2 — Considerar Somente Feriados com `fer_status = 1 (Ativo)` na Geração da Escala 5x2 (`app/Http/Controllers/Api/EscalaApiController.php` e `sp_gerar_escala_5x2_funcionario`):**
+   * Filtragem estrita `WHERE fer_status = 1` em todas as leituras da tabela `feriados` durante a geração e validação da escala 5x2 (`EscalaApiController::garantirLimitesDiariosDeFolga`, `EscalaApiController::garantirCoberturaFimDeSemanaEFeriados`, `EscalaApiController::atualizarEscalaDiaria` e Stored Procedure `sp_gerar_escala_5x2_funcionario`).
+   * Registros com `fer_status = 0 (Inativo)` servem exclusivamente para inativação do registro na tabela `feriados`, não sofrendo nenhum cálculo de feriado na geração da escala.
+
+3. **Sugestões Complementares Autorizadas (B e C):**
+   * **Sugestão B — Preservação e Sincronização de `fer_status` entre Empresas (`Feriado::gerarFeriadosDoPeriodo`, `Feriado::sincronizarEntreEmpresas` e `CrudApiController::salvarFeriado`):** Ao alterar `fer_status` para `0 - Inativo` ou `1 - Ativo`, o status é propagado para as demais empresas e preservado pelas rotinas automáticas sem nunca ser sobrescrito de volta para `1`.
+   * **Sugestão C — Badge Visual `ATIVO` / `INATIVO` na Tabela de Feriados e Contagem de Feriados Ativos na Home (`HomeController::index`, `public/js/farmaviva.js` e `resources/ts/farmaviva.ts`):** Exibição do badge de status em `#tbody-crud-feriados` e atualização em tempo real do indicador `#badge-home-fer-total` contabilizando apenas os feriados ativos (`fer_status = 1`).
+
+<< 17/11/2026 - Fim das Atualizações >>
+
+<< 20/11/2026 observação >>
+1. ;
+
+2. ;
+<< 20/11/2026 fim da observação >>

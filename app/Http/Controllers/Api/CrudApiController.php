@@ -657,6 +657,7 @@ class CrudApiController extends Controller
             'fer_data' => ['required', 'date'],
             'fer_descricao' => ['required', 'string', 'max:100'],
             'fer_tipo' => ['required', Rule::in(['nacional', 'estadual', 'municipal', 'facultativo'])],
+            'fer_status' => ['nullable', 'integer', Rule::in([0, 1])],
             'escopo_empresa' => ['nullable', 'boolean'],
         ]);
 
@@ -665,6 +666,7 @@ class CrudApiController extends Controller
             'fer_data' => $validated['fer_data'],
             'fer_descricao' => trim($validated['fer_descricao']),
             'fer_tipo' => $validated['fer_tipo'],
+            'fer_status' => isset($validated['fer_status']) ? (int) $validated['fer_status'] : 1,
         ];
 
         try {
@@ -676,13 +678,14 @@ class CrudApiController extends Controller
 
                 $feriado->update($dados);
 
-                // Sugestão C (14/11/2026): Propaga a edição para o registro equivalente nas demais empresas
+                // Sugestão C (14/11/2026) + Sugestão B (17/11/2026): Propaga a edição (incluindo fer_status) para as demais empresas
                 Feriado::where('fer_id', '!=', $feriado->fer_id)
                     ->whereDate('fer_data', $dataAntiga)
                     ->update([
                         'fer_data' => $dados['fer_data'],
                         'fer_descricao' => $dados['fer_descricao'],
                         'fer_tipo' => $dados['fer_tipo'],
+                        'fer_status' => $dados['fer_status'],
                     ]);
 
                 Feriado::sincronizarEntreEmpresas();

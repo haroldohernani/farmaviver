@@ -624,21 +624,28 @@
                         <form id="form-crud-feriado" class="card card-body bg-light border mb-3">
                             <input type="hidden" id="crud_fer_id" value="">
                             <div class="row g-2">
-                                <div class="col-12">
+                                <div class="col-12 col-md-4">
                                     <label class="form-label small fw-semibold mb-1" for="crud_fer_data">Data do Feriado *</label>
                                     <input type="date" class="form-control form-control-sm fv-form-control" id="crud_fer_data" required>
                                 </div>
-                                <div class="col-12 col-md-7">
+                                <div class="col-12 col-md-8">
                                     <label class="form-label small fw-semibold mb-1" for="crud_fer_descricao">Descrição *</label>
                                     <input type="text" class="form-control form-control-sm fv-form-control" id="crud_fer_descricao" placeholder="Ex: Aniversário de Manaus" required>
                                 </div>
-                                <div class="col-12 col-md-5">
+                                <div class="col-12 col-md-6">
                                     <label class="form-label small fw-semibold mb-1" for="crud_fer_tipo">Tipo *</label>
                                     <select class="form-select form-select-sm fv-form-control" id="crud_fer_tipo">
                                         <option value="nacional">Nacional</option>
                                         <option value="estadual">Estadual</option>
                                         <option value="municipal">Municipal</option>
                                         <option value="facultativo">Ponto Facultativo</option>
+                                    </select>
+                                </div>
+                                <div class="col-12 col-md-6">
+                                    <label class="form-label small fw-semibold mb-1" for="crud_fer_status">Status *</label>
+                                    <select class="form-select form-select-sm fv-form-control" id="crud_fer_status" disabled>
+                                        <option value="1" selected>1 - Ativo</option>
+                                        <option value="0">0 - Inativo</option>
                                     </select>
                                 </div>
                                 <div class="col-12 d-flex gap-2 pt-1">
@@ -659,16 +666,23 @@
                                         <th>Data</th>
                                         <th>Descrição<br>do Feriado</th>
                                         <th>Tipo</th>
+                                        <th>Status</th>
                                         <th>Abrangência</th>
                                         <th class="text-end">Ações</th>
                                     </tr>
                                 </thead>
                                 <tbody id="tbody-crud-feriados">
                                     @foreach($feriados as $fer)
+                                        @php $ferAtivo = ((int) ($fer->fer_status ?? 1)) === 1; @endphp
                                         <tr>
                                             <td><code>{{ $fer->fer_data->format('d/m/Y') }}</code></td>
                                             <td class="fw-bold">{{ $fer->fer_descricao }}</td>
                                             <td><span class="badge bg-secondary">{{ strtoupper($fer->fer_tipo) }}</span></td>
+                                            <td>
+                                                <span class="badge {{ $ferAtivo ? 'bg-dark' : 'bg-light text-muted border' }}">
+                                                    {{ $ferAtivo ? 'ATIVO' : 'INATIVO' }}
+                                                </span>
+                                            </td>
                                             <td>Todas as Empresas</td>
                                             <td class="text-end">
                                                 <button type="button" class="btn btn-sm btn-fv-outline btn-edit-feriado"
@@ -677,6 +691,7 @@
                                                         'fer_data' => $fer->fer_data->format('Y-m-d'),
                                                         'fer_descricao' => $fer->fer_descricao,
                                                         'fer_tipo' => $fer->fer_tipo,
+                                                        'fer_status' => (int) ($fer->fer_status ?? 1),
                                                     ]) }}">
                                                     <i class="bi bi-pencil"></i>
                                                 </button>

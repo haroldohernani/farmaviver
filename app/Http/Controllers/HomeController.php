@@ -164,7 +164,7 @@ class HomeController extends Controller
             'turnos_ativos' => $turnos->where('tur_ativo', true)->count(),
             'turnos_total' => $turnos->count(),
             'configuracoes_5x2' => $configuracoes5x2->where('cfg_ativo', true)->count(),
-            'feriados_total' => $feriados->count(),
+            'feriados_total' => $feriados->where('fer_status', 1)->count(),
             'periodos_total' => $periodos->count(),
             'trocas_pendentes' => $trocas->where('tro_status', 'pendente')->count(),
             'trocas_total' => $trocas->count(),

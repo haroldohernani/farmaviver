@@ -18,10 +18,12 @@ class Feriado extends Model
         'fer_data',
         'fer_descricao',
         'fer_tipo',
+        'fer_status',
     ];
 
     protected $casts = [
         'fer_data' => 'date:Y-m-d',
+        'fer_status' => 'integer',
         'fer_created_at' => 'datetime',
     ];
 
@@ -123,6 +125,10 @@ class Feriado extends Model
         }
 
         foreach ($feriadosPeriodo as $dataIso => $dadosFer) {
+            // Sugestão B (17/11/2026): Preserva o fer_status caso o feriado já exista em alguma empresa (ex.: inativado com 0)
+            $statusExistente = self::whereDate('fer_data', $dataIso)->value('fer_status');
+            $statusAplicar = $statusExistente !== null ? (int) $statusExistente : 1;
+
             foreach ($empresasIds as $idEmp) {
                 $existe = self::where('emp_id', $idEmp)
                     ->whereDate('fer_data', $dataIso)
@@ -134,6 +140,7 @@ class Feriado extends Model
                         'fer_data' => $dataIso,
                         'fer_descricao' => $dadosFer['fer_descricao'],
                         'fer_tipo' => $dadosFer['fer_tipo'],
+                        'fer_status' => $statusAplicar,
                     ]);
                 }
             }
@@ -184,6 +191,7 @@ class Feriado extends Model
                     'fer_data' => $dtIso,
                     'fer_descricao' => trim($fer->fer_descricao),
                     'fer_tipo' => $fer->fer_tipo ?: 'nacional',
+                    'fer_status' => (int) ($fer->fer_status ?? 1),
                 ];
             }
         }
@@ -224,6 +232,7 @@ class Feriado extends Model
                         'fer_data' => $modelo['fer_data'],
                         'fer_descricao' => $modelo['fer_descricao'],
                         'fer_tipo' => $modelo['fer_tipo'],
+                        'fer_status' => $modelo['fer_status'],
                     ]);
                 }
             }
