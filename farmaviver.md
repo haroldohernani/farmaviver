@@ -616,7 +616,25 @@ que aos sábados todas as Empresas cadastradas tem expediente da 08 as 20hs e ao
 << 17/11/2026 - Fim das Atualizações >>
 
 << 20/11/2026 observação >>
-1. ;
-
-2. ;
+1. Não pode o funcionário com o cargo = Farmacêutico(a) tirar folga no mesmo dia;
+2. Não pode nenhum mais de 1 funcionário tirar folga no mesmo dia;
 << 20/11/2026 fim da observação >>
+
+<< 20/11/2026 - atualização realizada >>
+
+### Registro das Alterações Autorizadas em 20/11/2026 (Itens 1 e 2 + Sugestões A, B e C)
+
+1. **Item 1 + Sugestão A — Trava Absoluta de Assistência Farmacêutica: Nunca 2 Colaboradores com `Cargo = Farmacêutico(a)` Sem Trabalhar no Mesmo Dia (`app/Http/Controllers/Api/EscalaApiController.php` e `sp_gerar_escala_5x2_funcionario`):**
+   * Implementação do método `ehCargoFarmaceutico()` e verificação estrita em todos os dias do período (Segunda a Sábado, Domingos e Feriados) impedindo que `Dra. Camila Nogueira` e `Dr. Funcionário II` (ambos `Farmacêutico(a) Responsável`) tirem descanso (`folga`, `dsr` ou `feriado`) na mesma data.
+   * Inclusão de trava também na edição manual de dia (`EscalaApiController::atualizarEscalaDiaria`), bloqueando qualquer alteração manual que coloque um 2º Farmacêutico de folga/DSR/feriado em um dia onde outro Farmacêutico já esteja descansando.
+
+2. **Item 2 — Nunca Mais de 1 Funcionário com `folga` (`esd_tipo_dia = 'folga'`) no Mesmo Dia (`app/Http/Controllers/Api/EscalaApiController.php` e `sp_gerar_escala_5x2_funcionario`):**
+   * **De Segunda a Sábado (exceto feriados ativos com `fer_status = 1`, como `08/12/2026` inativado com `fer_status = 0`):** Exatamente **1 único funcionário de folga por dia** (`5` trabalhando e `1` em `folga`).
+   * **Aos Domingos:** Exatamente **1 funcionário em `folga`** (`FOLGA`) e **1 funcionário em `dsr`** (`DSR — Descanso Semanal Remunerado`, contabilizado normalmente na view `vw_auditoria_folgas_domingo_mulheres` para garantir 100% de conformidade com o Art. 386 da CLT para todas as mulheres, sem jamais gerar 2 registros de `folga` no mesmo dia e sem 2 Farmacêuticos juntos).
+   * **Nos Feriados Ativos (`fer_status = 1`):** Exatamente **1 funcionário em `folga`** (folguista regular do dia da semana) e **1 funcionário em `feriado`** (`FERIADO`), mantendo 4 colaboradores trabalhando no plantão (`08h às 13h`).
+
+3. **Sugestões Complementares Autorizadas (B e C):**
+   * **Sugestão B — Atualização da Stored Procedure `sp_gerar_escala_5x2_funcionario` (Local e VPS):** Incorporação das regras dos Itens 1 e 2 diretamente no corpo da Stored Procedure `sp_gerar_escala_5x2_funcionario` (distribuição dos 6 dias individuais `Seg..Sáb`, trava de cargo `Farmacêutico(a)` e trava de `folga` única por dia).
+   * **Sugestão C — Recálculo Automático da Escala ao Alterar Status de Feriado (`CrudApiController::recalcularEscalasPorDataFeriado`) e Regeração de Novembro/2026 e Dezembro/2026:** Ao ativar/inativar (`fer_status = 1` ou `0`), editar ou excluir um feriado na aba **Feriados**, o sistema recalcula automaticamente as escalas já geradas do período correspondente (corrigindo imediatamente o dia `08/12/2026` inativado para terça-feira normal com apenas 1 funcionário de folga).
+
+<< 20/11/2026 - Fim das Atualizações >>

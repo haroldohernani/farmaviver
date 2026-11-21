@@ -689,6 +689,7 @@ class CrudApiController extends Controller
                     ]);
 
                 Feriado::sincronizarEntreEmpresas();
+                $this->recalcularEscalasPorDataFeriado($dados['fer_data'], $dataAntiga);
                 $msg = 'Feriado atualizado e sincronizado entre todas as empresas!';
             } else {
                 // Sugestão C (14/11/2026): Evita erro na chave única uk_feriados_emp_data (emp_id, fer_data)
@@ -704,6 +705,7 @@ class CrudApiController extends Controller
                 }
 
                 Feriado::sincronizarEntreEmpresas();
+                $this->recalcularEscalasPorDataFeriado($dados['fer_data']);
                 $msg = 'Feriado cadastrado e sincronizado para todas as empresas!';
             }
 
@@ -728,11 +730,42 @@ class CrudApiController extends Controller
             : substr((string) $feriado->fer_data, 0, 10);
 
         Feriado::whereDate('fer_data', $dataIso)->delete();
+        $this->recalcularEscalasPorDataFeriado($dataIso);
 
         return response()->json([
             'status' => 'ok',
             'message' => 'Feriado removido com sucesso!',
         ]);
+    }
+
+    /**
+     * Sugestão C (20/11/2026): Ao criar, editar, ativar/inativar (fer_status = 1/0) ou excluir um feriado,
+     * recalcula automaticamente os períodos de escala já gerados que abrangem a data do feriado.
+     */
+    protected function recalcularEscalasPorDataFeriado(string $dataNova, ?string $dataAntiga = null): void
+    {
+        $datas = array_unique(array_filter([$dataNova, $dataAntiga]));
+        if (empty($datas)) {
+            return;
+        }
+
+        $periodosAfetados = EscalaPeriodo::where(function ($q) use ($datas) {
+            foreach ($datas as $dt) {
+                $q->orWhere(function ($q2) use ($dt) {
+                    $q2->whereDate('esp_data_inicio', '<=', $dt)
+                       ->whereDate('esp_data_fim', '>=', $dt);
+                });
+            }
+        })->get();
+
+        if ($periodosAfetados->isEmpty()) {
+            return;
+        }
+
+        $escalaCtrl = app(EscalaApiController::class);
+        foreach ($periodosAfetados as $per) {
+            $escalaCtrl->recalcularLimitesPeriodo((int) $per->esp_id, (int) $per->emp_id);
+        }
     }
 
     public function salvarConfiguracaoEscala(Request $request, ?int $id = null): JsonResponse

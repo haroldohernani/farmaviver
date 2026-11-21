@@ -461,14 +461,43 @@ class EscalaApiController extends Controller
     }
 
     /**
-     * Item 1 + Sugestão A (15/11/2026):
+     * Verifica se o funcionário pertence ao cargo de Farmacêutico(a).
+     */
+    protected function ehCargoFarmaceutico(?Funcionario $func): bool
+    {
+        if (!$func) {
+            return false;
+        }
+        $nomeCargo = mb_strtolower(trim((string) ($func->cargo?->car_nome ?? '')), 'UTF-8');
+        return str_starts_with($nomeCargo, 'farmacêutic') || str_starts_with($nomeCargo, 'farmaceutic');
+    }
+
+    /**
+     * Recalcula os limites diários de folga, cobertura de fim de semana/feriados e equilíbrio de turnos
+     * para um período já gerado (utilizado também ao ativar/inativar feriados com fer_status = 1/0).
+     */
+    public function recalcularLimitesPeriodo(int $espId, int $empId): void
+    {
+        if (!EscalaDiaria::where('esp_id', $espId)->exists()) {
+            return;
+        }
+        [$turManha, $turNoite] = $this->obterTurnosAberturaEFechamento($empId);
+        $this->garantirLimitesDiariosDeFolga($espId, $empId, 'expediente', null, $turManha, $turNoite);
+        $this->garantirCoberturaFimDeSemanaEFeriados($espId, $empId, 'expediente');
+        if ($turManha && $turNoite) {
+            $this->garantirEquilibrioTurnosSemana($espId, $empId, $turManha, $turNoite);
+        }
+    }
+
+    /**
+     * Item 1 + Sugestão A (15/11/2026) + Itens 1 e 2 + Sugestão A (20/11/2026):
      * Garante rigorosamente na escala gerada:
-     * 1. De Segunda a Sábado (exceto feriados): no máximo 1 funcionário de folga por dia (nunca 2),
-     *    distribuindo os 6 dias (Seg..Sáb) entre os colaboradores ativos de forma intercalada entre
-     *    Turno Abertura (Manhã) e Turno Fechamento (Noite) e separando colaboradores do mesmo cargo.
-     * 2. Nos Domingos e Feriados: no máximo 2 funcionários de folga por dia (nunca 3 ou mais),
-     *    mantendo 4 colaboradores trabalhando no plantão (08h às 13h) e garantindo 2 domingos de folga
-     *    no mês para todas as colaboradoras do sexo feminino (Art. 386 da CLT).
+     * 1. NUNCA 2 funcionários com o cargo Farmacêutico(a) tiram folga/DSR/feriado no mesmo dia
+     *    (nem de segunda a sábado, nem aos domingos, nem nos feriados).
+     * 2. NUNCA mais de 1 funcionário tira `folga` (esd_tipo_dia = 'folga') no mesmo dia:
+     *    - De Segunda a Sábado (exceto feriados ativos com fer_status = 1): apenas 1 funcionário descansa ('folga') e 5 trabalham.
+     *    - Nos Domingos: 1 funcionário em 'folga' e 1 funcionário em 'dsr' (cumprindo os 2 domingos mensais do Art. 386 da CLT para todas as mulheres, sem 2 registros de 'folga' no mesmo dia e sem 2 Farmacêuticos descansando juntos).
+     *    - Nos Feriados ativos (fer_status = 1): 1 funcionário em 'folga' (folguista do dia) e 1 funcionário em 'feriado' (sem 2 Farmacêuticos descansando juntos).
      */
     protected function garantirLimitesDiariosDeFolga(
         int $espId,
@@ -591,12 +620,25 @@ class EscalaApiController extends Controller
             $contagemExtras[(int) $f->fun_id] = 0;
         }
 
-        // 3.1 Garante primeiro os 2 domingos de folga no mês para cada colaboradora mulher (CLT Art. 386) sem exceder 2 folgas por domingo
+        $funcsPorId = $funcsEscala->keyBy(fn (Funcionario $f) => (int) $f->fun_id);
+        $jaTemFarmaceuticoNoDia = function (array $idsNoDia) use ($funcsPorId): bool {
+            foreach ($idsNoDia as $idExistente) {
+                $fExist = $funcsPorId->get((int) $idExistente);
+                if ($this->ehCargoFarmaceutico($fExist)) {
+                    return true;
+                }
+            }
+            return false;
+        };
+
+        // 3.1 Garante primeiro os 2 domingos de folga/DSR no mês para cada colaboradora mulher (CLT Art. 386)
+        // sem exceder 2 descansos por domingo (1 'folga' + 1 'dsr') e NUNCA juntando 2 Farmacêuticos no mesmo domingo
         $mulheres = $funcsEscala->where('fun_sexo', 'F')->values();
         $qtdDomingos = count($domingosPeriodo);
         if ($qtdDomingos > 0) {
             foreach ($mulheres as $mIdx => $mulher) {
                 $funIdM = (int) $mulher->fun_id;
+                $mulherEhFarm = $this->ehCargoFarmaceutico($mulher);
                 $metaDomingosMulher = min(2, $qtdDomingos);
                 $atribuidos = 0;
 
@@ -628,6 +670,10 @@ class EscalaApiController extends Controller
                         if (in_array($funIdM, $folgasPorDomingo[$dtDom], true)) {
                             continue;
                         }
+                        // Item 1 (20/11/2026): Nunca permite 2 Farmacêuticos(as) descansando no mesmo dia
+                        if ($mulherEhFarm && $jaTemFarmaceuticoNoDia($folgasPorDomingo[$dtDom])) {
+                            continue;
+                        }
                         // Na 1ª tentativa evita domingos consecutivos para a mesma colaboradora
                         if ($tentativa === 0) {
                             $prevDom = $idxDom > 0 ? $domingosPeriodo[$idxDom - 1] : null;
@@ -645,12 +691,22 @@ class EscalaApiController extends Controller
                 }
             }
 
-            // 3.2 Preenche as vagas restantes de cada Domingo até exatamente $maxFolgasDomFer (2 folgas por domingo)
-            // priorizando os colaboradores homens (e quem tiver menos folgas extras no mês)
+            // 3.2 Preenche as vagas restantes de cada Domingo até $maxFolgasDomFer (1 'folga' + 1 'dsr'),
+            // bloqueando estritamente que um 2º Farmacêutico seja alocado no mesmo domingo em que outro Farmacêutico já descansa
             foreach ($domingosPeriodo as $dtDom) {
                 while (count($folgasPorDomingo[$dtDom]) < $maxFolgasDomFer) {
+                    $temFarmNoDom = $jaTemFarmaceuticoNoDia($folgasPorDomingo[$dtDom]);
+
                     $candidato = $funcsEscala
-                        ->reject(fn (Funcionario $f) => in_array((int) $f->fun_id, $folgasPorDomingo[$dtDom], true))
+                        ->reject(function (Funcionario $f) use ($folgasPorDomingo, $dtDom, $temFarmNoDom) {
+                            if (in_array((int) $f->fun_id, $folgasPorDomingo[$dtDom], true)) {
+                                return true;
+                            }
+                            if ($temFarmNoDom && $this->ehCargoFarmaceutico($f)) {
+                                return true;
+                            }
+                            return false;
+                        })
                         ->sortBy(function (Funcionario $f) use ($contagemExtras) {
                             $fid = (int) $f->fun_id;
                             return ($f->fun_sexo === 'M' ? '0_' : '1_')
@@ -670,31 +726,40 @@ class EscalaApiController extends Controller
             }
         }
 
-        // 4. Aplica dia a dia a regra estrita:
-        //    - Segunda a Sábado (não feriado): exatamente 1 funcionário de folga
-        //    - Domingos e Feriados: exatamente 2 funcionários de folga (nunca 3)
+        // 4. Aplica dia a dia as regras estritas (Itens 1 e 2 - 20/11/2026):
+        //    - Nunca 2 Farmacêuticos(as) sem trabalhar no mesmo dia
+        //    - Nunca mais de 1 registro com esd_tipo_dia = 'folga' no mesmo dia:
+        //      * Segunda a Sábado (não feriado ativo): 1 'folga' e 5 trabalhando
+        //      * Domingos: 1 'folga' e 1 'dsr' (4 trabalhando 08h às 13h)
+        //      * Feriados ativos (fer_status = 1): 1 'folga' e 1 'feriado' (4 trabalhando 08h às 13h)
         foreach ($datasPeriodo as $dtIso => $dow) {
             $feriadoObj = $feriadosMap->get($dtIso);
             $ehFeriado = $feriadoObj !== null;
 
             if ($dow === 1) {
-                // DOMINGO (com ou sem feriado): máximo 2 funcionários de folga e os outros 4 em trabalho (08h às 13h)
-                $idsFolgaHoje = $folgasPorDomingo[$dtIso] ?? [];
+                // DOMINGO: 1º descanso classificado como 'folga' e 2º descanso como 'dsr' (nunca 2 'folga' no mesmo dia e nunca 2 Farmacêuticos!)
+                $idsFolgaHoje = array_values($folgasPorDomingo[$dtIso] ?? []);
 
                 foreach ($funcsEscala as $func) {
                     $fid = (int) $func->fun_id;
-                    if (in_array($fid, $idsFolgaHoje, true)) {
+                    $posDom = array_search($fid, $idsFolgaHoje, true);
+                    if ($posDom !== false) {
+                        $tipoDiaDom = ($posDom === 0) ? 'folga' : 'dsr';
                         $obsFolga = $func->fun_sexo === 'F'
-                            ? 'Folga dominical obrigatória (CLT Art. 386)'
-                            : 'Folga dominical 5x2 (Revezamento)';
+                            ? ($tipoDiaDom === 'folga'
+                                ? 'Folga dominical obrigatória (CLT Art. 386)'
+                                : 'DSR dominical obrigatório (CLT Art. 386)')
+                            : ($tipoDiaDom === 'folga'
+                                ? 'Folga dominical 5x2 (Revezamento)'
+                                : 'DSR dominical 5x2 (Revezamento)');
 
                         DB::update("
                             UPDATE escalas_diarias
-                            SET esd_tipo_dia = 'folga',
+                            SET esd_tipo_dia = ?,
                                 tur_id = NULL,
                                 esd_observacao = ?
                             WHERE esp_id = ? AND fun_id = ? AND esd_data = ?
-                        ", [$obsFolga, $espId, $fid, $dtIso]);
+                        ", [$tipoDiaDom, $obsFolga, $espId, $fid, $dtIso]);
                     } else {
                         $turnoDom = $turDomFer ?: ($turIdForcado ?: ($func->tur_id_padrao ?: $turManha));
                         $obsTrab = $ehFeriado
@@ -711,7 +776,8 @@ class EscalaApiController extends Controller
                     }
                 }
             } elseif ($ehFeriado) {
-                // FERIADO EM DIA DE SEGUNDA A SÁBADO: máximo 2 funcionários de folga (1 folguista do dia + 1 revezamento) e 4 trabalhando (08h às 13h)
+                // FERIADO ATIVO (fer_status = 1) EM DIA DE SEGUNDA A SÁBADO:
+                // 1 funcionário em 'folga' (folguista do dia) + 1 funcionário em 'feriado' (nunca 2 'folga' e nunca 2 Farmacêuticos!)
                 $idsFolgaFeriado = [];
                 foreach ($funcsEscala as $func) {
                     $fid = (int) $func->fun_id;
@@ -722,8 +788,19 @@ class EscalaApiController extends Controller
                 }
 
                 while (count($idsFolgaFeriado) < $maxFolgasDomFer) {
+                    $temFarmNoFer = $jaTemFarmaceuticoNoDia($idsFolgaFeriado);
+
                     $candFer = $funcsEscala
-                        ->reject(fn (Funcionario $f) => in_array((int) $f->fun_id, $idsFolgaFeriado, true))
+                        ->reject(function (Funcionario $f) use ($idsFolgaFeriado, $temFarmNoFer) {
+                            if (in_array((int) $f->fun_id, $idsFolgaFeriado, true)) {
+                                return true;
+                            }
+                            // Item 1 (20/11/2026): Nunca permite 2 Farmacêuticos(as) sem trabalhar no mesmo dia
+                            if ($temFarmNoFer && $this->ehCargoFarmaceutico($f)) {
+                                return true;
+                            }
+                            return false;
+                        })
                         ->sortBy(function (Funcionario $f) use ($contagemExtras) {
                             $fid = (int) $f->fun_id;
                             return str_pad((string) ($contagemExtras[$fid] ?? 0), 4, '0', STR_PAD_LEFT)
@@ -1196,12 +1273,37 @@ class EscalaApiController extends Controller
                 ->whereDate('fer_data', $dataAlvoIso)
                 ->exists();
 
-            $outrosEmFolga = EscalaDiaria::with('funcionario')
+            $outrosEmFolga = EscalaDiaria::with('funcionario.cargo')
                 ->where('esp_id', $escalaDia->esp_id)
                 ->whereDate('esd_data', $dataAlvoIso)
                 ->where('esd_id', '!=', $escalaDia->esd_id)
                 ->whereIn('esd_tipo_dia', ['folga', 'dsr', 'feriado'])
                 ->get();
+
+            // Item 1 + Sugestão A (20/11/2026): Nunca permite 2 funcionários com cargo = Farmacêutico(a) de folga no mesmo dia
+            $funcAlvo = Funcionario::with('cargo')->find($escalaDia->fun_id);
+            if ($this->ehCargoFarmaceutico($funcAlvo)) {
+                $outroFarmFolga = $outrosEmFolga->first(fn (EscalaDiaria $d) => $this->ehCargoFarmaceutico($d->funcionario));
+                if ($outroFarmFolga) {
+                    $nomeFarm = $outroFarmFolga->funcionario?->fun_nome ?? ('#' . $outroFarmFolga->fun_id);
+                    return response()->json([
+                        'status' => 'error',
+                        'message' => "Regra de Assistência Farmacêutica: Não pode o funcionário com o cargo Farmacêutico(a) tirar folga no mesmo dia que outro Farmacêutico(a). Já está de folga nesta data: {$nomeFarm}.",
+                    ], 422);
+                }
+            }
+
+            // Item 2 (20/11/2026): Nunca permite mais de 1 funcionário com esd_tipo_dia = 'folga' no mesmo dia
+            if ($validated['esd_tipo_dia'] === 'folga') {
+                $outroComFolga = $outrosEmFolga->firstWhere('esd_tipo_dia', 'folga');
+                if ($outroComFolga) {
+                    $nomeFolga = $outroComFolga->funcionario?->fun_nome ?? ('#' . $outroComFolga->fun_id);
+                    return response()->json([
+                        'status' => 'error',
+                        'message' => "Regra de Escala 5x2: Não pode mais de 1 funcionário tirar folga no mesmo dia. Já está de folga nesta data: {$nomeFolga}.",
+                    ], 422);
+                }
+            }
 
             $nomesEmFolga = $outrosEmFolga
                 ->map(fn (EscalaDiaria $d) => $d->funcionario?->fun_nome ?? ('#' . $d->fun_id))
@@ -1211,14 +1313,14 @@ class EscalaApiController extends Controller
                 if ($outrosEmFolga->count() >= 2) {
                     return response()->json([
                         'status' => 'error',
-                        'message' => "Regra de Escala 5x2: Nos domingos e feriados só é permitido no máximo 2 funcionários de folga por dia (nunca 3 ou mais). Já estão de folga nesta data: {$nomesEmFolga}.",
+                        'message' => "Regra de Escala 5x2: Nos domingos e feriados ativos só é permitido no máximo 2 descansos por dia (1 Folga + 1 DSR/Feriado). Já estão descansando nesta data: {$nomesEmFolga}.",
                     ], 422);
                 }
             } else {
                 if ($outrosEmFolga->count() >= 1) {
                     return response()->json([
                         'status' => 'error',
-                        'message' => "Regra de Escala 5x2: De segunda a sábado (exceto feriados) não pode haver 2 funcionários de folga no mesmo dia. Já está de folga nesta data: {$nomesEmFolga}.",
+                        'message' => "Regra de Escala 5x2: Não pode mais de 1 funcionário tirar folga no mesmo dia. Já está de folga nesta data: {$nomesEmFolga}.",
                     ], 422);
                 }
             }
